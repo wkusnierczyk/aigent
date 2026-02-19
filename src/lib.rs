@@ -8,7 +8,7 @@ pub mod validator;
 // Re-export key types at crate root for convenience.
 pub use errors::{AigentError, Result};
 pub use models::SkillProperties;
-pub use parser::{find_skill_md, parse_frontmatter, read_properties};
+pub use parser::{find_skill_md, parse_frontmatter, read_properties, KNOWN_KEYS};
 pub use prompt::to_prompt;
 pub use validator::{validate, validate_metadata};
 

@@ -67,13 +67,12 @@ fn main() {
     match cli.command {
         Some(Commands::Validate { skill_dir }) => {
             let dir = resolve_skill_dir(&skill_dir);
-            let errors = aigent::validate(&dir);
-            if errors.is_empty() {
-                std::process::exit(0);
-            } else {
-                for e in &errors {
-                    eprintln!("{e}");
-                }
+            let messages = aigent::validate(&dir);
+            let has_errors = messages.iter().any(|m| !m.starts_with("warning: "));
+            for m in &messages {
+                eprintln!("{m}");
+            }
+            if has_errors {
                 std::process::exit(1);
             }
         }

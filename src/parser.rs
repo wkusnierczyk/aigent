@@ -118,7 +118,10 @@ pub fn parse_frontmatter(content: &str) -> Result<(HashMap<String, Value>, Strin
 }
 
 /// Known frontmatter keys that map to typed `SkillProperties` fields.
-const KNOWN_KEYS: &[&str] = &[
+///
+/// Used by both the parser (to extract known fields) and the validator
+/// (to detect unexpected metadata keys). Single source of truth.
+pub const KNOWN_KEYS: &[&str] = &[
     "name",
     "description",
     "license",
