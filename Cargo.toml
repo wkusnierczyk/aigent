@@ -5,7 +5,7 @@ edition = "2021"
 license = "MIT"
 description = "A library, CLI, and Claude plugin for managing agent skill definitions"
 repository = "https://github.com/wkusnierczyk/aigent"
-authors = ["Wojciech Kuśnierczyk"]
+authors = ["Wacław Kuśnierczyk"]
 keywords = ["ai", "agent", "skills", "claude", "llm"]
 categories = ["command-line-utilities", "development-tools"]
 
