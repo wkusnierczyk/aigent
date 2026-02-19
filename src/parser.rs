@@ -24,10 +24,18 @@ pub fn find_skill_md(dir: &Path) -> Option<PathBuf> {
 ///
 /// Returns `(metadata_map, body_text)`.
 ///
+/// Delimiter matching uses `trim_end()`, so trailing whitespace on `---` lines
+/// is tolerated (e.g., `"---  "` or `"---\t"`). Leading whitespace is **not**
+/// trimmed — `"  ---"` does not match.
+///
+/// All mapping keys must be strings; non-string keys (e.g., integer `42:`) are
+/// rejected as a `Parse` error.
+///
 /// # Errors
 ///
 /// - `AigentError::Parse` if the content does not start with `---`, the closing
-///   `---` delimiter is missing, or the YAML parses to a non-mapping value.
+///   `---` delimiter is missing, the YAML parses to a non-mapping value, or a
+///   mapping key is not a string.
 /// - `AigentError::Yaml` if the YAML between delimiters has syntax errors
 ///   (propagated naturally via `?` to preserve line/column info).
 pub fn parse_frontmatter(content: &str) -> Result<(HashMap<String, Value>, String)> {
@@ -77,12 +85,16 @@ pub fn parse_frontmatter(content: &str) -> Result<(HashMap<String, Value>, Strin
         }
     };
 
-    // Step 5: Convert to HashMap<String, Value>.
+    // Step 5: Convert to HashMap<String, Value>, rejecting non-string keys.
     let mut map = HashMap::new();
     for (k, v) in mapping {
         let key = match k {
             Value::String(s) => s,
-            other => other.as_str().unwrap_or(&format!("{other:?}")).to_string(),
+            other => {
+                return Err(AigentError::Parse {
+                    message: format!("frontmatter contains non-string key: {other:?}"),
+                });
+            }
         };
         map.insert(key, v);
     }
@@ -323,6 +335,24 @@ mod tests {
         // Verify the key is kebab-case, not snake_case.
         assert!(meta.contains_key("allowed-tools"));
         assert!(!meta.contains_key("allowed_tools"));
+    }
+
+    #[test]
+    fn parse_frontmatter_trailing_whitespace_on_delimiters() {
+        // `trim_end()` means trailing spaces/tabs on `---` lines are tolerated.
+        let content = "---  \nname: test\n---\t\nBody\n";
+        let (meta, body) = parse_frontmatter(content).unwrap();
+        assert_eq!(meta["name"], Value::String("test".to_string()));
+        assert!(body.contains("Body"));
+    }
+
+    #[test]
+    fn parse_frontmatter_non_string_key_rejected() {
+        // Integer keys in YAML are rejected as a Parse error.
+        let content = "---\n42: value\n---\n";
+        let err = parse_frontmatter(content).unwrap_err();
+        assert!(matches!(err, AigentError::Parse { .. }));
+        assert!(err.to_string().contains("non-string key"));
     }
 
     #[test]
