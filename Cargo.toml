@@ -1,0 +1,32 @@
+[package]
+name = "aigent"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "A library, CLI, and Claude plugin for managing agent skill definitions"
+repository = "https://github.com/wkusnierczyk/aigent"
+authors = ["Wacław Kuśnierczyk"]
+keywords = ["ai", "agent", "skills", "claude", "llm"]
+categories = ["command-line-utilities", "development-tools"]
+
+[lib]
+name = "aigent"
+path = "src/lib.rs"
+
+[[bin]]
+name = "aigent"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+thiserror = "2"
+unicode-normalization = "0.1"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
