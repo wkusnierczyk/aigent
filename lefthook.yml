@@ -1,0 +1,14 @@
+pre-commit:
+  parallel: true
+  commands:
+    format-check:
+      run: cargo fmt --check
+    lint:
+      run: cargo clippy -- -D warnings
+
+pre-push:
+  commands:
+    test:
+      run: cargo test
+    lint:
+      run: cargo clippy -- -D warnings
