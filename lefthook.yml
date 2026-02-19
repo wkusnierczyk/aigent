@@ -8,7 +8,11 @@ pre-commit:
 
 pre-push:
   commands:
-    test:
-      run: cargo test
+    format-check:
+      run: cargo fmt --check
     lint:
       run: cargo clippy -- -D warnings
+    test:
+      run: cargo test
+    build:
+      run: cargo build --release
