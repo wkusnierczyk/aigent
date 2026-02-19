@@ -1,4 +1,3 @@
-use std::fmt::Write;
 use std::path::Path;
 
 use crate::parser::{find_skill_md, read_properties};
@@ -60,25 +59,17 @@ pub fn to_prompt(dirs: &[&Path]) -> String {
             None => continue,
         };
 
-        let location_str = location.to_string_lossy();
+        let location_str = xml_escape(&location.to_string_lossy());
 
-        // Write the <skill> element with 2/4-space indentation.
-        // `write!` on `String` is infallible, so `unwrap()` is safe.
-        writeln!(out, "  <skill>").unwrap();
-        writeln!(out, "    <name>{}</name>", xml_escape(&props.name)).unwrap();
-        writeln!(
-            out,
-            "    <description>{}</description>",
+        // Build the <skill> element with 2/4-space indentation.
+        out.push_str("  <skill>\n");
+        out.push_str(&format!("    <name>{}</name>\n", xml_escape(&props.name)));
+        out.push_str(&format!(
+            "    <description>{}</description>\n",
             xml_escape(&props.description)
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "    <location>{}</location>",
-            xml_escape(&location_str)
-        )
-        .unwrap();
-        writeln!(out, "  </skill>").unwrap();
+        ));
+        out.push_str(&format!("    <location>{location_str}</location>\n"));
+        out.push_str("  </skill>\n");
     }
 
     out.push_str("</available_skills>");

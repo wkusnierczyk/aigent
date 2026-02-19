@@ -225,6 +225,191 @@ the spec examples. So aigent's format is *more spec-compliant* than the ref.
 
 ## Checklist for Plan Finalization
 
-- [ ] Decide on path resolution: canonicalize or keep as-is (finding #2)
-- [ ] Document XML format divergence from reference implementation (finding #1)
-- [ ] Consider adding `'` → `&apos;` to `xml_escape` (finding #3)
+- [x] Decide on path resolution: canonicalize or keep as-is (finding #2)
+- [x] Document XML format divergence from reference implementation (finding #1)
+- [x] Consider adding `'` → `&apos;` to `xml_escape` (finding #3)
+
+---
+---
+
+# Code Review of `dev/m05`
+
+**Reviewer:** Claude Opus 4.6
+**Date:** 2026-02-19
+**Scope:** Implementation review for M5: Prompt Generation
+**Commit:** `f4eda5d M5: Implement XML prompt generation with skill directory support`
+**Files changed:** `src/prompt.rs`, `dev/m05/plan.md`, `dev/m05/review.md`
+
+---
+
+## Verification
+
+| Check | Result |
+|-------|--------|
+| `cargo fmt --check` | ✅ Clean |
+| `cargo clippy -- -D warnings` | ✅ Clean |
+| `cargo test` | ✅ 102 passed, 0 failed |
+| Test count: prompt | 15 (matches plan: 15) |
+| Test count: total | 102 (was 87 in M4; +15 new) |
+
+No changes to `src/lib.rs` or `src/main.rs` — both were already wired up.
+
+---
+
+## Plan Conformance
+
+### Review Finding Resolutions — All 3 Resolved
+
+**Finding #1 (Medium): XML format diverges from reference implementation.**
+✅ Resolved. Plan updated to document that the indented inline format follows
+the Anthropic spec examples, not the reference implementation. Doc comment on
+`to_prompt` (line 25-27) explicitly references the spec and describes the
+format. The divergence will be documented in M8: Docs.
+
+**Finding #2 (Medium): Path resolution.**
+✅ Resolved. `std::fs::canonicalize(dir)` is called before `read_properties`
+(line 46). If `canonicalize` fails, the directory is skipped. Test
+`to_prompt_location_is_absolute` (line 230) extracts the `<location>` value
+and asserts `Path::new(location).is_absolute()`.
+
+**Finding #3 (Low): `xml_escape` missing `'` → `&apos;`.**
+✅ Resolved. Line 16: `.replace('\'', "&apos;")` added. Test
+`xml_escape_single_quote` (line 127) verifies `"it's"` → `"it&apos;s"`.
+Doc comment updated: "Escape all five XML predefined entities."
+
+### Plan vs Implementation Mapping
+
+| Plan Item | Status | Notes |
+|-----------|--------|-------|
+| `xml_escape`: add `'` → `&apos;` | ✅ | Line 16 |
+| `to_prompt`: init `<available_skills>\n` | ✅ | Line 42 |
+| `to_prompt`: canonicalize each dir | ✅ | Lines 46-49 |
+| `to_prompt`: `read_properties` skip on error | ✅ | Lines 52-55 |
+| `to_prompt`: `find_skill_md` defensive | ✅ | Lines 58-61 |
+| `to_prompt`: 2/4-space indented XML | ✅ | Lines 67-81 |
+| `to_prompt`: close `</available_skills>` | ✅ | Line 84 |
+| `xml_escape` tests: 8 | ✅ | 8 tests |
+| `to_prompt` tests: 7 | ✅ | 7 tests |
+| Total: 15 tests | ✅ | 15 confirmed |
+| `#[must_use]` on both functions | ✅ | Lines 10, 40 |
+| `use std::fmt::Write` | ✅ | Line 1 |
+| Signature unchanged: `&[&Path] -> String` | ✅ | Line 41 |
+
+---
+
+## Findings
+
+### 1. Low: `to_string_lossy()` silently replaces invalid UTF-8 in paths
+
+**Reference:** `prompt.rs:63`
+
+The location path is converted to a string via `location.to_string_lossy()`,
+which replaces invalid UTF-8 bytes with the Unicode replacement character
+`U+FFFD` (�). On most systems this is irrelevant — filesystem paths are
+typically valid UTF-8 (macOS enforces UTF-8; Linux allows arbitrary bytes
+but they're rare in practice).
+
+However, if a path *did* contain non-UTF-8 bytes, the `<location>` element
+would contain `�` characters, making it unresolvable by the LLM. The
+alternative is `to_str()` returning `Option<&str>` and skipping paths that
+aren't valid UTF-8. This would be more correct but adds complexity for an
+extremely rare edge case.
+
+**Recommendation:** No change needed. `to_string_lossy()` is the standard
+Rust idiom for path-to-string conversion, and the project already uses it
+elsewhere. Documenting the behavior in a comment would be sufficient if
+desired.
+
+### 2. Low: `writeln!` + `unwrap()` vs project convention
+
+**Reference:** `prompt.rs:66-81`
+
+The implementation uses `writeln!(out, ...).unwrap()` seven times. The
+doc comment on line 66 correctly explains why this is safe: `write!` on
+`String` is infallible. This is a well-known Rust pattern — `String`'s
+`fmt::Write` implementation cannot fail.
+
+The project convention (CLAUDE.md) says "No `unwrap()` in library code."
+Strictly, `prompt.rs` is library code (it's in `src/`, not `main.rs`). The
+`unwrap()` calls are provably safe, but they technically violate the letter
+of the convention.
+
+**Options:**
+
+**(a) Keep `unwrap()` with the justification comment.** The convention
+exists to prevent panics on fallible operations; these are infallible.
+
+**(b) Use `let _ = writeln!(...);`** to silently discard the always-Ok
+result. This avoids `unwrap()` but hides intent.
+
+**(c) Use `write!` + `push_str` alternatives** to avoid `fmt::Write`
+entirely:
+```rust
+out.push_str("  <skill>\n");
+out.push_str(&format!("    <name>{}</name>\n", xml_escape(&props.name)));
+```
+This replaces `writeln!` + `unwrap()` with `push_str` + `format!`, avoiding
+both the `Write` trait and `unwrap()`. Slightly more verbose but no
+convention tension.
+
+**Recommendation:** Option (a) is fine — the comment documents the safety
+invariant, and the intent is clear. This is a style question, not a
+correctness issue.
+
+---
+
+## Observations (not issues)
+
+### Clean three-guard pipeline
+
+The `to_prompt` loop body has three sequential guards:
+1. `canonicalize(dir)` — skip if path doesn't exist
+2. `read_properties(&canonical)` — skip if SKILL.md missing/unparsable
+3. `find_skill_md(&canonical)` — defensive, should always succeed after #2
+
+Each uses `match ... { Ok(x) => x, Err(_) => continue }`, which is the
+idiomatic Rust pattern for "skip on error in a loop." The three guards are
+ordered from cheapest to most expensive (filesystem stat → file read + YAML
+parse → filesystem lookup), which is good practice even though the difference
+is negligible for small directory counts.
+
+### Test helper reuses M4 pattern
+
+The `make_skill_dir` helper (line 96) follows the same pattern as the M4
+validator tests: create a parent `TempDir`, create a named subdirectory,
+write SKILL.md, return `(TempDir, PathBuf)`. The parent `TempDir` is kept
+alive for RAII lifetime management. This consistency across milestones makes
+the test infrastructure predictable.
+
+### `to_prompt_location_is_absolute` test is well-designed
+
+This test (line 230) doesn't just check `contains("/")` — it extracts the
+actual `<location>` value by finding `<location>` and `</location>` markers,
+then asserts `Path::new(location).is_absolute()`. This is the right way to
+test canonicalization: it verifies the semantic property (absolute path)
+rather than a fragile string pattern.
+
+### No trailing newline after `</available_skills>`
+
+The output ends with `</available_skills>` (no trailing `\n`). This means
+`main.rs`'s `println!("{}", aigent::to_prompt(&dirs))` adds exactly one
+newline at the end. If `push_str` were replaced with `writeln!`, there'd
+be a double-newline. The current approach is correct.
+
+### `xml_escape` test #7 is comprehensive
+
+The `xml_escape_multiple_special_characters` test (line 137) uses a string
+that exercises all five entity escapes in a single input:
+`<tag attr="v">&'x'</tag>`. This is a good integration-style test that
+catches ordering bugs (e.g., if `<` were escaped before `&`, the `&` in
+`&lt;` would be double-escaped).
+
+---
+
+## Verdict
+
+**Ready to merge.** All three plan review findings are resolved. Implementation
+matches the plan exactly — 15 prompt tests, `xml_escape` updated with
+`&apos;`, paths canonicalized, XML format matches Anthropic spec. Two low
+findings are style/edge-case observations with no functional impact. The
+verification suite is fully green (102 tests, clean fmt and clippy).
