@@ -198,6 +198,7 @@ fn to_prompt_multiple_skills() {
         .args(["to-prompt", d1.to_str().unwrap(), d2.to_str().unwrap()])
         .output()
         .unwrap();
+    assert!(out.status.success(), "expected exit code 0");
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert_eq!(stdout.matches("<skill>").count(), 2);
     assert!(stdout.contains("<name>skill-one</name>"));
@@ -227,6 +228,7 @@ fn to_prompt_mixed_valid_and_invalid() {
         .args(["to-prompt", good.to_str().unwrap(), bad.to_str().unwrap()])
         .output()
         .unwrap();
+    assert!(out.status.success(), "expected exit code 0");
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert_eq!(stdout.matches("<skill>").count(), 1);
     assert!(stdout.contains("<name>good-skill</name>"));
