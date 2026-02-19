@@ -26,12 +26,12 @@ pub enum AigentError {
 
 /// Format validation errors for display.
 ///
-/// - Empty list → `"validation failed: no details"`
+/// - Empty list → `"Validation failed: no details"`
 /// - Single error → the error message itself
 /// - Multiple errors → bullet list prefixed with `"Validation failed:"`
 fn format_validation_errors(errors: &[String]) -> String {
     match errors.len() {
-        0 => "validation failed: no details".to_string(),
+        0 => "Validation failed: no details".to_string(),
         1 => errors[0].clone(),
         _ => {
             let bullets: String = errors.iter().map(|e| format!("\n  - {e}")).collect();
@@ -77,7 +77,7 @@ mod tests {
     #[test]
     fn validation_empty_errors_display() {
         let err = AigentError::Validation { errors: vec![] };
-        assert_eq!(err.to_string(), "validation failed: no details");
+        assert_eq!(err.to_string(), "Validation failed: no details");
     }
 
     #[test]

@@ -184,6 +184,21 @@ metadata:
     }
 
     #[test]
+    fn partial_eq_identical() {
+        let a = full_props();
+        let b = full_props();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn partial_eq_different_field() {
+        let a = minimal_props();
+        let mut b = minimal_props();
+        b.name = "different".to_string();
+        assert_ne!(a, b);
+    }
+
+    #[test]
     fn deserialize_yaml_missing_name_fails() {
         let yaml = "description: bar\n";
         let result = serde_yaml_ng::from_str::<SkillProperties>(yaml);
