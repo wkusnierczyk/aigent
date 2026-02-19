@@ -50,34 +50,29 @@ fn validate_name(name: &str, dir: Option<&Path>) -> Vec<String> {
         errors.push(format!("name contains invalid character: '{c}'"));
     }
 
-    // 4. No XML tags in name.
-    if contains_xml_tags(&normalized) {
-        errors.push("name contains XML/HTML tags".to_string());
-    }
-
-    // 5. No leading hyphen.
+    // 4. No leading hyphen.
     if normalized.starts_with('-') {
         errors.push("name must not start with a hyphen".to_string());
     }
 
-    // 6. No trailing hyphen.
+    // 5. No trailing hyphen.
     if normalized.ends_with('-') {
         errors.push("name must not end with a hyphen".to_string());
     }
 
-    // 7. No consecutive hyphens.
+    // 6. No consecutive hyphens.
     if normalized.contains("--") {
         errors.push("name contains consecutive hyphens".to_string());
     }
 
-    // 8. Reserved words — checked as hyphen-delimited segments.
+    // 7. Reserved words — checked as hyphen-delimited segments.
     for word in RESERVED_WORDS {
         if normalized.split('-').any(|seg| seg == *word) {
             errors.push(format!("name contains reserved word: '{word}'"));
         }
     }
 
-    // 9. Directory name match.
+    // 8. Directory name match.
     if let Some(dir) = dir {
         if let Some(dir_name) = dir.file_name().and_then(|n| n.to_str()) {
             let dir_normalized: String = dir_name.nfkc().collect();
@@ -161,8 +156,10 @@ pub fn validate_metadata(metadata: &HashMap<String, Value>, dir: Option<&Path>) 
         }
     }
 
-    // 4. Warn about unexpected metadata keys.
-    for key in metadata.keys() {
+    // 4. Warn about unexpected metadata keys (sorted for deterministic output).
+    let mut keys: Vec<_> = metadata.keys().collect();
+    keys.sort();
+    for key in keys {
         if !KNOWN_KEYS.contains(&key.as_str()) {
             messages.push(format!("warning: unexpected metadata field: '{key}'"));
         }
@@ -423,10 +420,15 @@ mod tests {
     }
 
     #[test]
-    fn name_with_xml_tags() {
+    fn name_with_xml_characters_rejected() {
+        // XML-like characters are caught by the character validation (not a
+        // separate XML check), since `<`, `>`, and `/` are invalid in names.
         let meta = make_metadata(&[("name", "<img/>skill"), ("description", "desc")]);
         let errors = validate_metadata(&meta, None);
-        assert!(errors.iter().any(|e| e.contains("name contains XML/HTML")));
+        assert!(
+            errors.iter().any(|e| e.contains("invalid character")),
+            "expected invalid character error, got: {errors:?}"
+        );
     }
 
     #[test]

@@ -220,9 +220,246 @@ skills.
 
 ## Checklist for Plan Finalization
 
-- [ ] Resolve warning/error integration with `main.rs` exit code (finding #1)
-- [ ] Fix CJK character acceptance rule to use `is_alphabetic() && !is_uppercase()` instead of `is_lowercase()` (finding #3)
-- [ ] Document that `validate_metadata` expects raw `parse_frontmatter` output (finding #2)
-- [ ] Consider sharing `KNOWN_KEYS` between parser and validator (finding #2)
-- [ ] Decide on substring vs segment matching for reserved words (finding #4)
-- [ ] Add test for reserved word as substring of longer segment (finding #4)
+- [x] Resolve warning/error integration with `main.rs` exit code (finding #1)
+- [x] Fix CJK character acceptance rule to use `is_alphabetic() && !is_uppercase()` instead of `is_lowercase()` (finding #3)
+- [x] Document that `validate_metadata` expects raw `parse_frontmatter` output (finding #2)
+- [x] Consider sharing `KNOWN_KEYS` between parser and validator (finding #2)
+- [x] Decide on substring vs segment matching for reserved words (finding #4)
+- [x] Add test for reserved word as substring of longer segment (finding #4)
+
+---
+---
+
+# Code Review of `dev/m04`
+
+**Reviewer:** Claude Opus 4.6
+**Date:** 2026-02-19
+**Scope:** Implementation review for M4: Validator
+**Commit:** `2b5c5cc M4: Implement skill directory and metadata validator`
+**Files changed:** `src/validator.rs`, `src/parser.rs`, `src/lib.rs`, `src/main.rs`,
+`dev/m04/plan.md`, `dev/m04/review.md`
+
+---
+
+## Verification
+
+| Check | Result |
+|-------|--------|
+| `cargo fmt --check` | ✅ Clean |
+| `cargo clippy -- -D warnings` | ✅ Clean |
+| `cargo test` | ✅ 87 passed, 0 failed |
+| Test count: validator | 36 (matches plan: 36) |
+| Test count: parser | 23 (was 21 in M3; +2 new) |
+| Test count: total | 87 (was 49 in M3; +38 new) |
+
+---
+
+## Plan Conformance
+
+### Review Finding Resolutions — All 4 Resolved
+
+**Finding #1 (Medium): `warning:` prefix + `main.rs` exit code.**
+✅ Resolved via option (a). `main.rs` now filters warnings with
+`messages.iter().any(|m| !m.starts_with("warning: "))` before deciding exit code.
+Warnings are still printed to stderr but do not cause exit code 1.
+
+**Finding #2 (Medium): `validate_metadata` + `KNOWN_KEYS` duplication.**
+✅ Resolved. `parser::KNOWN_KEYS` made `pub` (line 124). Validator imports it
+via `use crate::parser::{find_skill_md, parse_frontmatter, KNOWN_KEYS}`. Doc
+comment on `validate_metadata` explicitly states it expects raw
+`parse_frontmatter` output:
+
+> "Expects raw `parse_frontmatter` output — the full `HashMap` before
+> known-key extraction. **Not** suitable for use on
+> `SkillProperties.metadata` (which has known keys already removed)."
+
+**Finding #3 (Low): CJK `is_lowercase()` spec bug.**
+✅ Resolved. Character rule correctly uses:
+```rust
+if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' { continue; }
+if c.is_alphabetic() && !c.is_uppercase() { continue; }
+```
+Tests `chinese_characters_accepted` and `uppercase_cyrillic_rejected` confirm
+the rule works for CJK (accepted), Cyrillic lowercase (accepted), and Cyrillic
+uppercase (rejected).
+
+**Finding #4 (Low): Reserved word substring vs segment matching.**
+✅ Resolved. Uses segment matching: `normalized.split('-').any(|seg| seg == *word)`.
+Tests `reserved_word_as_substring_accepted` (name `claudette` passes) and
+`reserved_word_as_exact_segment_rejected` (name `my-claude-tool` fails) confirm
+the behavior.
+
+### Plan vs Implementation Mapping
+
+| Plan Item | Status | Notes |
+|-----------|--------|-------|
+| `validate_name` — 9 checks | ✅ | All 9 implemented in order |
+| `validate_description` — 3 checks | ✅ | Empty, length, XML |
+| `validate_compatibility` — 1 check | ✅ | Length only |
+| `contains_xml_tags` helper | ✅ | `LazyLock<Regex>` |
+| `validate_metadata` — 4 steps | ✅ | name, description, compatibility, unexpected keys |
+| `validate` — 6 steps | ✅ | find → read → parse → validate → body warning |
+| `KNOWN_KEYS` made `pub` | ✅ | `src/parser.rs:124` |
+| `KNOWN_KEYS` re-exported | ✅ | `src/lib.rs` |
+| `main.rs` warning filter | ✅ | `src/main.rs:71` |
+| 36 tests | ✅ | 36 validator tests confirmed |
+
+### Parser Changes (M3 → M4)
+
+Two changes to `src/parser.rs`:
+
+1. **`KNOWN_KEYS` visibility**: `const KNOWN_KEYS` → `pub const KNOWN_KEYS`.
+   Single-line change, correct.
+
+2. **Re-export in `lib.rs`**: `pub use parser::{..., KNOWN_KEYS}` added.
+   Correct.
+
+No other parser changes — the M3 implementation is untouched.
+
+---
+
+## Findings
+
+### 1. Low: `validate_name` returns early on empty but not on XML-containing names
+
+**References:** `validator.rs:31-35,53-56`
+
+When `name` is empty, `validate_name` returns early (line 34: `return errors`).
+This is correct — subsequent checks (leading hyphen, trailing hyphen, etc.)
+would produce misleading errors on an empty string.
+
+However, when `name` contains XML tags (line 54), the check does not short-
+circuit. A name like `<script>alert('x')</script>` would accumulate:
+- "name contains invalid character: '<'" (char check)
+- "name contains invalid character: '>'" (char check)
+- "name contains invalid character: '('" (char check)
+- "name contains invalid character: '''" (char check)
+- "name contains invalid character: ')'" (char check)
+- "name contains XML/HTML tags" (XML check)
+
+The XML error is redundant with the character errors — the invalid characters
+already flag the problem. This is not a bug (all errors are accurate), but it
+is noisy. The XML check on `name` mainly adds value for names that are
+*otherwise valid* but happen to contain a cleverly-crafted tag using only valid
+characters — which is impossible since `<` and `>` are always invalid.
+
+**Recommendation:** Consider removing the XML tag check from `validate_name`
+entirely. The character validation already rejects `<` and `>`. The XML check
+adds value only for `description` and `compatibility`, which accept a wider
+character set. This is cosmetic — no functional impact.
+
+### 2. Low: `validate` body line counting with `lines()` vs trailing newline
+
+**Reference:** `validator.rs:202`
+
+The body line count uses `body.lines().count()`. Rust's `str::lines()` does
+*not* include a trailing empty line for a string ending in `\n`. For example:
+
+```rust
+"line1\nline2\n".lines().count() // → 2, not 3
+"line1\nline2".lines().count()   // → 2
+```
+
+This is consistent — `parse_frontmatter` preserves the trailing newline from
+the original content (line 110: `format!("{joined}\n")`), and `lines()` ignores
+it. So a 500-line body with a trailing newline correctly counts as 500, not 501.
+
+The tests (`validate_body_over_500_lines_warning` and
+`validate_body_at_500_lines_no_warning`) construct bodies using
+`(0..N).map(...).collect::<Vec<_>>().join("\n")` then wrap with
+`format!("---\nname: my-skill\ndescription: desc\n---\n{body}\n")`. This
+adds a trailing `\n` after the body, which `lines()` ignores. The tests pass,
+confirming the count is correct.
+
+Not an issue — documenting for completeness.
+
+### 3. Low: Non-deterministic warning order for unexpected metadata keys
+
+**Reference:** `validator.rs:165-169`
+
+The unexpected-key warning loop iterates `metadata.keys()`, which returns keys
+in the `HashMap`'s internal (non-deterministic) order. If a SKILL.md has
+multiple unexpected keys, the warnings may appear in different orders across
+runs.
+
+This is not a functional problem — the warnings are independent and their order
+doesn't affect correctness. The test `unexpected_metadata_field_warning` checks
+for the presence of a warning via `any()`, so it's order-independent.
+
+**Recommendation:** If stable output is desired (e.g., for snapshot testing or
+deterministic CI logs), sort the keys before iterating:
+
+```rust
+let mut keys: Vec<_> = metadata.keys().collect();
+keys.sort();
+for key in keys { ... }
+```
+
+This is optional polish — no functional impact.
+
+---
+
+## Observations (not issues)
+
+### Clean `validate` pipeline
+
+The `validate` function is a model of defensive programming. Each step
+(find → read → parse → validate → body) can fail independently, and each
+failure mode returns an appropriate error list. Parse failures produce a single-
+element `Vec` with the error message, while validation failures accumulate.
+The pattern of converting `parse_frontmatter` errors via `e.to_string()` bridges
+the `Result<T>` world (parser) to the `Vec<String>` world (validator) cleanly.
+
+### Test helper design
+
+The `make_metadata` and `make_skill_dir` helpers are well-designed:
+- `make_metadata` builds `HashMap<String, Value>` from string pairs — concise
+  for most tests.
+- `make_skill_dir` creates a named subdirectory in a temp dir with SKILL.md —
+  the parent `TempDir` is returned for lifetime management, a common pattern
+  for Rust test fixtures.
+
+Both avoid test boilerplate while keeping the setup explicit.
+
+### Boundary tests with warning filtering
+
+Several boundary tests (e.g., `name_exactly_64_chars`,
+`compatibility_exactly_500_chars`) filter out warnings before asserting
+emptiness:
+
+```rust
+let real_errors: Vec<_> = errors
+    .iter()
+    .filter(|e| !e.starts_with("warning: "))
+    .collect();
+assert!(real_errors.is_empty(), ...);
+```
+
+This is necessary because boundary-value metadata may trigger the unexpected-
+key warning (if the test doesn't include all known keys). The filtering pattern
+is consistent across all boundary tests. Good practice.
+
+### `#[must_use]` annotations
+
+Both `validate_metadata` and `validate` have `#[must_use]`, following the
+project convention from CLAUDE.md. This prevents callers from accidentally
+discarding the validation results — `rustc` will warn if the return value is
+unused.
+
+### Reserved words as `const` slice
+
+`RESERVED_WORDS` is `&[&str]` rather than a `HashSet`. For a 2-element list
+this is correct — linear scan is faster than hash lookup for tiny collections,
+and the constant is entirely stack-allocated with no heap overhead. The
+implementation uses `RESERVED_WORDS` in a loop that iterates both the reserved
+list and the name segments, which is O(segments × reserved). For realistic
+names (≤5 segments) and reserved lists (2 words), this is negligible.
+
+---
+
+## Verdict
+
+**Ready to merge.** All four plan review findings are resolved. Implementation
+matches the plan exactly — 36 validator tests, all pre-requisite changes
+applied. The three findings are all low-severity cosmetic issues that do not
+affect correctness or safety. The verification suite is fully green.
