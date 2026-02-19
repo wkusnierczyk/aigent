@@ -112,13 +112,12 @@ fn print_about() {
     println!(
         "aigent: Rust AI Agent Skills Tool\n\
          ├─ version:    {}\n\
-         ├─ authors:    {}\n\
+         ├─ author:     {}\n\
          ├─ source:     {}\n\
-         └─ license:    {} https://opensource.org/licenses/{}",
+         └─ license:    {}",
         env!("CARGO_PKG_VERSION"),
         env!("CARGO_PKG_AUTHORS"),
         env!("CARGO_PKG_REPOSITORY"),
-        env!("CARGO_PKG_LICENSE"),
         env!("CARGO_PKG_LICENSE"),
     );
 }
