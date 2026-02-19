@@ -12,7 +12,7 @@ src/
 ├── lib.rs          # Library root — re-exports public API
 ├── errors.rs       # Error types (thiserror)
 ├── models.rs       # SkillProperties (serde)
-├── parser.rs       # SKILL.md frontmatter parser (serde_yaml)
+├── parser.rs       # SKILL.md frontmatter parser (serde_yaml_ng)
 ├── validator.rs    # Metadata & directory validator
 ├── prompt.rs       # XML prompt generation
 ├── builder.rs      # Skill builder (deterministic + LLM)

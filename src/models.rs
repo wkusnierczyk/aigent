@@ -17,5 +17,5 @@ pub struct SkillProperties {
     pub allowed_tools: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<HashMap<String, serde_yaml::Value>>,
+    pub metadata: Option<HashMap<String, serde_yaml_ng::Value>>,
 }

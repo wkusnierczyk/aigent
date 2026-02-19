@@ -129,7 +129,7 @@ fn resolve_skill_dir(path: &std::path::Path) -> PathBuf {
     if path.is_file() {
         path.parent()
             .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| path.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."))
     } else {
         path.to_path_buf()
     }

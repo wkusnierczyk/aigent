@@ -36,11 +36,13 @@ pub fn build_skill(_spec: &SkillSpec, _output_dir: &Path) -> Result<BuildResult>
 }
 
 /// Derive a kebab-case skill name from a natural language description.
+#[must_use]
 pub fn derive_name(_purpose: &str) -> String {
     todo!()
 }
 
 /// Evaluate if a purpose description is clear enough for autonomous generation.
+#[must_use]
 pub fn assess_clarity(_purpose: &str) -> ClarityAssessment {
     todo!()
 }

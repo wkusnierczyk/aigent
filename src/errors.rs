@@ -17,7 +17,7 @@ pub enum AigentError {
 
     /// YAML deserialization error.
     #[error("YAML error: {0}")]
-    Yaml(#[from] serde_yaml::Error),
+    Yaml(#[from] serde_yaml_ng::Error),
 
     /// Skill build error.
     #[error("build error: {message}")]
