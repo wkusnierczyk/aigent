@@ -38,15 +38,48 @@ fi
 # Download and install
 ASSET="aigent-${VERSION}-${TARGET}.tar.gz"
 URL="https://github.com/${REPO}/releases/download/${VERSION}/${ASSET}"
+CHECKSUM_URL="https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt"
 
 echo "Installing aigent ${VERSION} for ${TARGET}..."
 mkdir -p "$INSTALL_DIR"
 
-if ! curl -fsSL "$URL" | tar xz -C "$INSTALL_DIR"; then
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
+
+# Download archive and checksums
+if ! curl -fsSL -o "${TMPDIR}/${ASSET}" "$URL"; then
   echo "Error: download failed — check that a release exists for ${TARGET}" >&2
   exit 1
 fi
 
+if curl -fsSL -o "${TMPDIR}/checksums.txt" "$CHECKSUM_URL" 2>/dev/null; then
+  # Verify checksum
+  EXPECTED=$(grep "${ASSET}" "${TMPDIR}/checksums.txt" | awk '{print $1}')
+  if [ -n "$EXPECTED" ]; then
+    if command -v sha256sum > /dev/null 2>&1; then
+      ACTUAL=$(sha256sum "${TMPDIR}/${ASSET}" | awk '{print $1}')
+    elif command -v shasum > /dev/null 2>&1; then
+      ACTUAL=$(shasum -a 256 "${TMPDIR}/${ASSET}" | awk '{print $1}')
+    else
+      echo "Warning: no sha256sum or shasum available, skipping checksum verification" >&2
+      ACTUAL="$EXPECTED"
+    fi
+    if [ "$ACTUAL" != "$EXPECTED" ]; then
+      echo "Error: checksum verification failed" >&2
+      echo "  Expected: $EXPECTED" >&2
+      echo "  Actual:   $ACTUAL" >&2
+      exit 1
+    fi
+    echo "Checksum verified."
+  else
+    echo "Warning: no checksum found for ${ASSET}, skipping verification" >&2
+  fi
+else
+  echo "Warning: checksums.txt not available, skipping verification" >&2
+fi
+
+# Extract
+tar xzf "${TMPDIR}/${ASSET}" -C "$INSTALL_DIR"
 chmod +x "${INSTALL_DIR}/aigent"
 
 # Verify

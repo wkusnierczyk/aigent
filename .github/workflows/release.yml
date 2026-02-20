@@ -108,6 +108,12 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum *.tar.gz *.zip 2>/dev/null > checksums.txt || true
+          cat checksums.txt
+
       - name: Extract changelog
         run: |
           VERSION=${GITHUB_REF_NAME#v}

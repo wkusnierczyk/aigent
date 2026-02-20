@@ -750,3 +750,214 @@ fn validate_json_shape_consistent_single_and_multi_dir() {
         "multi-dir entry should have 'diagnostics'"
     );
 }
+
+// ── M11: to-prompt --format flag ──────────────────────────────────
+
+#[test]
+fn to_prompt_format_json() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: A test skill\n---\nBody.\n",
+    );
+    let output = aigent()
+        .args(["to-prompt", dir.to_str().unwrap(), "--format", "json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert!(json.is_array());
+    let arr = json.as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["name"], "my-skill");
+}
+
+#[test]
+fn to_prompt_format_yaml() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: A test skill\n---\nBody.\n",
+    );
+    aigent()
+        .args(["to-prompt", dir.to_str().unwrap(), "--format", "yaml"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("skills:"))
+        .stdout(predicate::str::contains("- name: my-skill"));
+}
+
+#[test]
+fn to_prompt_format_markdown() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: A test skill\n---\nBody.\n",
+    );
+    aigent()
+        .args(["to-prompt", dir.to_str().unwrap(), "--format", "markdown"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Available Skills"))
+        .stdout(predicate::str::contains("## my-skill"));
+}
+
+#[test]
+fn to_prompt_budget_flag() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: A test skill\n---\nBody.\n",
+    );
+    aigent()
+        .args(["to-prompt", dir.to_str().unwrap(), "--budget"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Token budget"))
+        .stderr(predicate::str::contains("Total:"));
+}
+
+// ── M11: to-prompt --output flag ──────────────────────────────────
+
+#[test]
+fn to_prompt_output_creates_file() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: A test skill\n---\nBody.\n",
+    );
+    let out_dir = tempdir().unwrap();
+    let out_file = out_dir.path().join("prompt.xml");
+    aigent()
+        .args([
+            "to-prompt",
+            dir.to_str().unwrap(),
+            "--output",
+            out_file.to_str().unwrap(),
+        ])
+        .assert()
+        .failure() // exit 1 = changed (file didn't exist)
+        .stderr(predicate::str::contains("Updated"));
+    assert!(out_file.exists());
+    let content = fs::read_to_string(&out_file).unwrap();
+    assert!(content.contains("<available_skills>"));
+}
+
+#[test]
+fn to_prompt_output_unchanged_exit_zero() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: A test skill\n---\nBody.\n",
+    );
+    let out_dir = tempdir().unwrap();
+    let out_file = out_dir.path().join("prompt.xml");
+    // First run: creates file (exit 1).
+    aigent()
+        .args([
+            "to-prompt",
+            dir.to_str().unwrap(),
+            "--output",
+            out_file.to_str().unwrap(),
+        ])
+        .assert()
+        .failure();
+    // Second run: same input, should be unchanged (exit 0).
+    aigent()
+        .args([
+            "to-prompt",
+            dir.to_str().unwrap(),
+            "--output",
+            out_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Unchanged"));
+}
+
+#[test]
+fn to_prompt_output_with_format() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: A test skill\n---\nBody.\n",
+    );
+    let out_dir = tempdir().unwrap();
+    let out_file = out_dir.path().join("prompt.json");
+    aigent()
+        .args([
+            "to-prompt",
+            dir.to_str().unwrap(),
+            "--format",
+            "json",
+            "--output",
+            out_file.to_str().unwrap(),
+        ])
+        .assert()
+        .failure(); // exit 1 = changed
+    let content = fs::read_to_string(&out_file).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+    assert!(json.is_array());
+}
+
+// ── M11: init --template flag ─────────────────────────────────────
+
+#[test]
+fn init_with_template_reference_guide() {
+    let parent = tempdir().unwrap();
+    let dir = parent.path().join("ref-skill");
+    aigent()
+        .args([
+            "init",
+            dir.to_str().unwrap(),
+            "--template",
+            "reference-guide",
+        ])
+        .assert()
+        .success();
+    assert!(dir.join("SKILL.md").exists());
+    assert!(dir.join("REFERENCE.md").exists());
+    assert!(dir.join("EXAMPLES.md").exists());
+}
+
+#[test]
+fn init_with_template_code_skill() {
+    let parent = tempdir().unwrap();
+    let dir = parent.path().join("code-skill");
+    aigent()
+        .args(["init", dir.to_str().unwrap(), "--template", "code-skill"])
+        .assert()
+        .success();
+    assert!(dir.join("SKILL.md").exists());
+    assert!(dir.join("scripts/run.sh").exists());
+}
+
+#[test]
+fn init_with_template_claude_code() {
+    let parent = tempdir().unwrap();
+    let dir = parent.path().join("cc-skill");
+    aigent()
+        .args(["init", dir.to_str().unwrap(), "--template", "claude-code"])
+        .assert()
+        .success();
+    let content = fs::read_to_string(dir.join("SKILL.md")).unwrap();
+    assert!(content.contains("user-invocable: true"));
+}
+
+// ── M11: build --interactive flag ─────────────────────────────────
+
+#[test]
+fn build_interactive_flag_accepted() {
+    // Just verify the flag is accepted (with piped "n" to cancel).
+    let parent = tempdir().unwrap();
+    let dir = parent.path().join("interactive-cli");
+    aigent()
+        .args([
+            "build",
+            "Process PDF files and extract text from documents",
+            "--no-llm",
+            "--name",
+            "interactive-cli",
+            "--dir",
+            dir.to_str().unwrap(),
+            "--interactive",
+        ])
+        .write_stdin("n\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cancelled"));
+}
