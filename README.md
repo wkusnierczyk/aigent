@@ -1,7 +1,7 @@
 <table>
   <tr>
     <td>
-      <img src="https://raw.githubusercontent.com/wkusnierczyk/aigent-skills/main/graphics/aigent.png" alt="logo" width="300" />
+      <img src="https://raw.githubusercontent.com/wkusnierczyk/aigent/main/graphics/aigent.png" alt="logo" width="300" />
     </td>
     <td>
       <p><strong>aigent</strong>:
