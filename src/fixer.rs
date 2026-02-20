@@ -5,12 +5,26 @@
 //! frontmatter fields only (name and description).
 
 use std::path::Path;
+use std::sync::LazyLock;
 
 use regex::Regex;
 
 use crate::diagnostics::{Diagnostic, E002, E003, E006, E012};
 use crate::errors::Result;
 use crate::parser::find_skill_md;
+
+/// Regex for matching the `name` field line in frontmatter.
+static NAME_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?m)^name:\s*(.+)$").expect("name regex must compile"));
+
+/// Regex for matching the `description` field line in frontmatter.
+static DESCRIPTION_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?m)^description:\s*(.+)$").expect("description regex must compile")
+});
+
+/// Regex for matching XML/HTML tags.
+static TAG_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"<[a-zA-Z/][^>]*>").expect("tag regex must compile"));
 
 /// Apply automatic fixes to a SKILL.md file based on diagnostics.
 ///
@@ -34,12 +48,12 @@ pub fn apply_fixes(dir: &Path, diagnostics: &[Diagnostic]) -> Result<usize> {
         if diag.suggestion.is_none() {
             continue;
         }
+        let before = modified.clone();
         match diag.code {
             E002 => {
                 // Truncate name at hyphen boundary.
                 if let Some(truncated) = extract_quoted_value(&diag.suggestion) {
                     modified = fix_frontmatter_field(&modified, "name", &truncated);
-                    fix_count += 1;
                 }
             }
             E003 => {
@@ -50,22 +64,22 @@ pub fn apply_fixes(dir: &Path, diagnostics: &[Diagnostic]) -> Result<usize> {
                     .is_some_and(|s| s.starts_with("Use lowercase:"))
                 {
                     modified = lowercase_name_in_frontmatter(&modified);
-                    fix_count += 1;
                 }
             }
             E006 => {
                 // Collapse consecutive hyphens.
                 if let Some(collapsed) = extract_quoted_value(&diag.suggestion) {
                     modified = fix_frontmatter_field(&modified, "name", &collapsed);
-                    fix_count += 1;
                 }
             }
             E012 => {
                 // Strip XML tags from description.
                 modified = strip_xml_from_description(&modified);
-                fix_count += 1;
             }
             _ => {}
+        }
+        if modified != before {
+            fix_count += 1;
         }
     }
 
@@ -92,29 +106,32 @@ fn extract_quoted_value(suggestion: &Option<String>) -> Option<String> {
 
 /// Replace a frontmatter field value in SKILL.md content.
 fn fix_frontmatter_field(content: &str, field: &str, new_value: &str) -> String {
-    let re = Regex::new(&format!(r"(?m)^{field}:\s*(.+)$")).expect("fix regex must compile");
+    let re = match field {
+        "name" => &*NAME_RE,
+        "description" => &*DESCRIPTION_RE,
+        _ => return content.to_string(),
+    };
     re.replace(content, format!("{field}: {new_value}"))
         .to_string()
 }
 
 /// Lowercase the `name` field value in frontmatter.
 fn lowercase_name_in_frontmatter(content: &str) -> String {
-    let re = Regex::new(r"(?m)^name:\s*(.+)$").expect("name regex must compile");
-    re.replace(content, |caps: &regex::Captures| {
-        format!("name: {}", caps[1].to_lowercase())
-    })
-    .to_string()
+    NAME_RE
+        .replace(content, |caps: &regex::Captures| {
+            format!("name: {}", caps[1].to_lowercase())
+        })
+        .to_string()
 }
 
 /// Strip XML/HTML tags from the `description` field in frontmatter.
 fn strip_xml_from_description(content: &str) -> String {
-    let re = Regex::new(r"(?m)^description:\s*(.+)$").expect("description regex must compile");
-    let tag_re = Regex::new(r"<[a-zA-Z/][^>]*>").expect("tag regex must compile");
-    re.replace(content, |caps: &regex::Captures| {
-        let cleaned = tag_re.replace_all(&caps[1], "").to_string();
-        format!("description: {cleaned}")
-    })
-    .to_string()
+    DESCRIPTION_RE
+        .replace(content, |caps: &regex::Captures| {
+            let cleaned = TAG_RE.replace_all(&caps[1], "").to_string();
+            format!("description: {cleaned}")
+        })
+        .to_string()
 }
 
 #[cfg(test)]
@@ -266,5 +283,41 @@ mod tests {
         fs::create_dir(&dir).unwrap();
         let result = apply_fixes(&dir, &[]);
         assert!(result.is_err(), "should fail if SKILL.md not found");
+    }
+
+    #[test]
+    fn apply_fixes_multiple_e003_on_same_field_counts_one() {
+        // "MySkill" has two uppercase chars (M and S), generating two E003
+        // diagnostics. Only one fix is applied because the second lowercase
+        // operation produces no change.
+        let (_parent, dir) = make_skill_dir(
+            "myskill",
+            "---\nname: MySkill\ndescription: A valid skill\n---\n",
+        );
+        let diags = vec![
+            Diagnostic::new(
+                Severity::Error,
+                E003,
+                "name contains invalid character: 'M'",
+            )
+            .with_field("name")
+            .with_suggestion("Use lowercase: 'm'"),
+            Diagnostic::new(
+                Severity::Error,
+                E003,
+                "name contains invalid character: 'S'",
+            )
+            .with_field("name")
+            .with_suggestion("Use lowercase: 's'"),
+        ];
+
+        let count = apply_fixes(&dir, &diags).unwrap();
+        assert_eq!(count, 1, "only one actual change should be counted");
+
+        let content = fs::read_to_string(dir.join("SKILL.md")).unwrap();
+        assert!(
+            content.contains("name: myskill"),
+            "name should be lowercased: {content}"
+        );
     }
 }

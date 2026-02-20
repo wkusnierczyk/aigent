@@ -385,8 +385,11 @@ fn validate_format_json_valid() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
-    assert!(json.is_array());
-    assert!(json.as_array().unwrap().is_empty());
+    let arr = json.as_array().unwrap();
+    assert_eq!(arr.len(), 1, "expected single entry in array");
+    assert!(arr[0].get("path").is_some(), "entry should have 'path'");
+    let diags = arr[0]["diagnostics"].as_array().unwrap();
+    assert!(diags.is_empty(), "expected no diagnostics");
 }
 
 #[test]
@@ -401,9 +404,12 @@ fn validate_format_json_with_errors() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     let arr = json.as_array().unwrap();
-    assert!(!arr.is_empty());
+    assert_eq!(arr.len(), 1, "expected single entry in array");
+    assert!(arr[0].get("path").is_some(), "entry should have 'path'");
+    let diags = arr[0]["diagnostics"].as_array().unwrap();
+    assert!(!diags.is_empty());
     // Check that diagnostics have expected structure.
-    let first = &arr[0];
+    let first = &diags[0];
     assert!(first.get("severity").is_some());
     assert!(first.get("code").is_some());
     assert!(first.get("message").is_some());
@@ -422,8 +428,10 @@ fn validate_format_json_with_warnings() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     let arr = json.as_array().unwrap();
+    assert_eq!(arr.len(), 1, "expected single entry in array");
+    let diags = arr[0]["diagnostics"].as_array().unwrap();
     assert!(
-        arr.iter().any(|d| d["severity"] == "warning"),
+        diags.iter().any(|d| d["severity"] == "warning"),
         "expected warning diagnostic in JSON output"
     );
 }
@@ -648,5 +656,96 @@ fn validate_apply_fixes_xml_tags_in_description() {
     assert!(
         !content.contains("<b>"),
         "XML tags should be removed: {content}"
+    );
+}
+
+// ── recursive mode with file path ───────────────────────────────────
+
+#[test]
+fn validate_recursive_with_file_path_input() {
+    // Passing a SKILL.md file path with --recursive should resolve to
+    // the parent and discover skills from there.
+    let parent = tempdir().unwrap();
+    let skill_a = parent.path().join("skill-a");
+    let skill_b = parent.path().join("skill-b");
+    fs::create_dir(&skill_a).unwrap();
+    fs::create_dir(&skill_b).unwrap();
+    fs::write(
+        skill_a.join("SKILL.md"),
+        "---\nname: skill-a\ndescription: First\n---\nBody.\n",
+    )
+    .unwrap();
+    fs::write(
+        skill_b.join("SKILL.md"),
+        "---\nname: skill-b\ndescription: Second\n---\nBody.\n",
+    )
+    .unwrap();
+    // Pass a file path (SKILL.md) instead of a directory with --recursive.
+    let skill_a_md = skill_a.join("SKILL.md");
+    aigent()
+        .args(["validate", skill_a_md.to_str().unwrap(), "--recursive"])
+        .assert()
+        .success();
+}
+
+// ── JSON output shape consistency ───────────────────────────────────
+
+#[test]
+fn validate_json_shape_consistent_single_and_multi_dir() {
+    // Both single-dir and multi-dir should produce the same JSON shape:
+    // an array of objects with "path" and "diagnostics" keys.
+    let (_p1, d1) = make_skill_dir(
+        "json-skill-one",
+        "---\nname: json-skill-one\ndescription: First\n---\nBody.\n",
+    );
+    let (_p2, d2) = make_skill_dir(
+        "json-skill-two",
+        "---\nname: json-skill-two\ndescription: Second\n---\nBody.\n",
+    );
+
+    // Single dir.
+    let single = aigent()
+        .args(["validate", d1.to_str().unwrap(), "--format", "json"])
+        .output()
+        .unwrap();
+    let single_json: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(single.stdout).unwrap()).unwrap();
+
+    // Multi dir.
+    let multi = aigent()
+        .args([
+            "validate",
+            d1.to_str().unwrap(),
+            d2.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    let multi_json: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(multi.stdout).unwrap()).unwrap();
+
+    // Both should be arrays.
+    assert!(single_json.is_array(), "single-dir JSON should be an array");
+    assert!(multi_json.is_array(), "multi-dir JSON should be an array");
+
+    // Both entries should have the same shape: {path, diagnostics}.
+    let single_entry = &single_json.as_array().unwrap()[0];
+    let multi_entry = &multi_json.as_array().unwrap()[0];
+    assert!(
+        single_entry.get("path").is_some(),
+        "single-dir entry should have 'path'"
+    );
+    assert!(
+        single_entry.get("diagnostics").is_some(),
+        "single-dir entry should have 'diagnostics'"
+    );
+    assert!(
+        multi_entry.get("path").is_some(),
+        "multi-dir entry should have 'path'"
+    );
+    assert!(
+        multi_entry.get("diagnostics").is_some(),
+        "multi-dir entry should have 'diagnostics'"
     );
 }

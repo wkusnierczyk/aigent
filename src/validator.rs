@@ -7,8 +7,8 @@ use serde_yaml_ng::Value;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::diagnostics::{
-    Diagnostic, Severity, ValidationTarget, E001, E002, E003, E004, E005, E006, E007, E009, E010,
-    E011, E012, E013, E014, E015, E016, E017, E018, W001, W002,
+    Diagnostic, Severity, ValidationTarget, E000, E001, E002, E003, E004, E005, E006, E007, E009,
+    E010, E011, E012, E013, E014, E015, E016, E017, E018, W001, W002,
 };
 use crate::parser::{find_skill_md, parse_frontmatter, KNOWN_KEYS};
 
@@ -341,13 +341,7 @@ pub fn validate_with_target(dir: &Path, target: ValidationTarget) -> Vec<Diagnos
     // 1. Find SKILL.md.
     let path = match find_skill_md(dir) {
         Some(p) => p,
-        None => {
-            return vec![Diagnostic::new(
-                Severity::Error,
-                "E000",
-                "SKILL.md not found",
-            )]
-        }
+        None => return vec![Diagnostic::new(Severity::Error, E000, "SKILL.md not found")],
     };
 
     // 2. Read the file.
@@ -356,7 +350,7 @@ pub fn validate_with_target(dir: &Path, target: ValidationTarget) -> Vec<Diagnos
         Err(e) => {
             return vec![Diagnostic::new(
                 Severity::Error,
-                "E000",
+                E000,
                 format!("IO error: {e}"),
             )]
         }
@@ -365,7 +359,7 @@ pub fn validate_with_target(dir: &Path, target: ValidationTarget) -> Vec<Diagnos
     // 3. Parse frontmatter.
     let (metadata, body) = match parse_frontmatter(&content) {
         Ok(result) => result,
-        Err(e) => return vec![Diagnostic::new(Severity::Error, "E000", e.to_string())],
+        Err(e) => return vec![Diagnostic::new(Severity::Error, E000, e.to_string())],
     };
 
     // 4. Validate metadata.

@@ -98,6 +98,11 @@ impl fmt::Display for Diagnostic {
 
 // ── Error code constants ────────────────────────────────────────────────
 
+// Infrastructure errors (E000)
+
+/// Infrastructure error (file not found, IO error, parse failure).
+pub const E000: &str = "E000";
+
 // Name validation errors (E001–E009)
 
 /// Name must not be empty.
@@ -114,7 +119,8 @@ pub const E005: &str = "E005";
 pub const E006: &str = "E006";
 /// Name contains reserved word.
 pub const E007: &str = "E007";
-// E008 reserved for name XML tags (caught by E003 character validation).
+/// Name contains XML/HTML tags (reserved; currently caught by E003 character validation).
+pub const E008: &str = "E008";
 /// Name does not match directory name.
 pub const E009: &str = "E009";
 
@@ -275,8 +281,8 @@ mod tests {
     #[test]
     fn error_codes_are_unique() {
         let codes = [
-            E001, E002, E003, E004, E005, E006, E007, E009, E010, E011, E012, E013, E014, E015,
-            E016, E017, E018, W001, W002,
+            E000, E001, E002, E003, E004, E005, E006, E007, E008, E009, E010, E011, E012, E013,
+            E014, E015, E016, E017, E018, W001, W002,
         ];
         let mut seen = std::collections::HashSet::new();
         for code in &codes {

@@ -203,28 +203,23 @@ fn main() {
                             .count();
                         let ok = total - errors - warnings;
                         eprintln!(
-                            "\n{total} skills: {ok} ok, {errors} errors, {warnings} warnings"
+                            "\n{total} skills: {ok} ok, {errors} errors, {warnings} warnings only"
                         );
                     }
                 }
                 Format::Json => {
-                    // For single dir: flat array. For multi: array of objects.
-                    if all_diags.len() == 1 {
-                        let json = serde_json::to_string_pretty(&all_diags[0].1).unwrap();
-                        println!("{json}");
-                    } else {
-                        let entries: Vec<serde_json::Value> = all_diags
-                            .iter()
-                            .map(|(dir, diags)| {
-                                serde_json::json!({
-                                    "path": dir.display().to_string(),
-                                    "diagnostics": diags,
-                                })
+                    // Always emit consistent array-of-objects format.
+                    let entries: Vec<serde_json::Value> = all_diags
+                        .iter()
+                        .map(|(dir, diags)| {
+                            serde_json::json!({
+                                "path": dir.display().to_string(),
+                                "diagnostics": diags,
                             })
-                            .collect();
-                        let json = serde_json::to_string_pretty(&entries).unwrap();
-                        println!("{json}");
-                    }
+                        })
+                        .collect();
+                    let json = serde_json::to_string_pretty(&entries).unwrap();
+                    println!("{json}");
                 }
             }
 
@@ -350,13 +345,18 @@ fn resolve_skill_dir(path: &std::path::Path) -> PathBuf {
 /// Resolve a list of input paths into skill directories.
 ///
 /// When `recursive` is true, discovers skills under each path recursively.
+/// File paths (e.g., `path/to/SKILL.md`) are resolved to their parent
+/// directory before recursive discovery.
 /// When false, treats each path as a direct skill directory (resolving
 /// SKILL.md file paths to their parent).
 fn resolve_dirs(paths: &[PathBuf], recursive: bool) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     for path in paths {
         if recursive {
-            dirs.extend(aigent::discover_skills(path));
+            // If the user passes a SKILL.md file path, resolve to its parent
+            // before running recursive discovery.
+            let resolved = resolve_skill_dir(path);
+            dirs.extend(aigent::discover_skills(&resolved));
         } else {
             dirs.push(resolve_skill_dir(path));
         }
