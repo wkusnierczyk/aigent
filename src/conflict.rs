@@ -148,16 +148,24 @@ fn estimate_entry_tokens(entry: &SkillEntry) -> usize {
 /// Tokenizes both strings into lowercase words, then computes the ratio
 /// of intersection size to union size. Returns a value between 0.0 and 1.0.
 fn jaccard_similarity(a: &str, b: &str) -> f64 {
-    let set_a: HashSet<&str> = a
+    let words_a: Vec<String> = a
         .split_whitespace()
-        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+        .map(|w| {
+            w.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
         .filter(|w| !w.is_empty())
         .collect();
-    let set_b: HashSet<&str> = b
+    let words_b: Vec<String> = b
         .split_whitespace()
-        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+        .map(|w| {
+            w.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
         .filter(|w| !w.is_empty())
         .collect();
+    let set_a: HashSet<&str> = words_a.iter().map(|s| s.as_str()).collect();
+    let set_b: HashSet<&str> = words_b.iter().map(|s| s.as_str()).collect();
 
     if set_a.is_empty() && set_b.is_empty() {
         return 0.0;
@@ -311,6 +319,15 @@ mod tests {
         let sim = jaccard_similarity("hello world", "hello there");
         // intersection={hello}, union={hello, world, there} → 1/3 ≈ 0.33
         assert!((sim - 1.0 / 3.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn jaccard_case_insensitive() {
+        let sim = jaccard_similarity("PDF Files", "pdf files");
+        assert!(
+            (sim - 1.0).abs() < f64::EPSILON,
+            "expected 1.0 for case-only difference, got: {sim}",
+        );
     }
 
     #[test]

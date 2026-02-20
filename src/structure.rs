@@ -12,7 +12,10 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::diagnostics::{Diagnostic, Severity, S001, S002, S003, S004};
+use crate::diagnostics::{Diagnostic, Severity, S001, S003, S004};
+
+#[cfg(unix)]
+use crate::diagnostics::S002;
 
 /// Maximum allowed nesting depth for files referenced from SKILL.md.
 const MAX_REFERENCE_DEPTH: usize = 1;
@@ -126,50 +129,54 @@ fn check_references(dir: &Path, body: &str) -> Vec<Diagnostic> {
 /// Only checked on Unix systems. On non-Unix platforms, this check is
 /// skipped entirely.
 fn check_script_permissions(dir: &Path) -> Vec<Diagnostic> {
+    check_script_permissions_impl(dir)
+}
+
+/// Platform-specific script permission check.
+#[cfg(unix)]
+fn check_script_permissions_impl(dir: &Path) -> Vec<Diagnostic> {
+    use std::os::unix::fs::PermissionsExt;
+
     let mut diags = Vec::new();
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return diags,
+    };
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-
-        let entries = match std::fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(_) => return diags,
-        };
-
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() {
-                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                    if ext.eq_ignore_ascii_case("sh") {
-                        if let Ok(metadata) = std::fs::metadata(&path) {
-                            let mode = metadata.permissions().mode();
-                            if mode & 0o111 == 0 {
-                                let name = path
-                                    .file_name()
-                                    .and_then(|n| n.to_str())
-                                    .unwrap_or("unknown");
-                                diags.push(
-                                    Diagnostic::new(
-                                        Severity::Warning,
-                                        S002,
-                                        format!("script missing execute permission: '{name}'"),
-                                    )
-                                    .with_field("structure")
-                                    .with_suggestion(format!("Run: chmod +x {name}")),
-                                );
-                            }
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                if ext.eq_ignore_ascii_case("sh") {
+                    if let Ok(metadata) = std::fs::metadata(&path) {
+                        let mode = metadata.permissions().mode();
+                        if mode & 0o111 == 0 {
+                            let name = path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("unknown");
+                            diags.push(
+                                Diagnostic::new(
+                                    Severity::Warning,
+                                    S002,
+                                    format!("script missing execute permission: '{name}'"),
+                                )
+                                .with_field("structure")
+                                .with_suggestion(format!("Run: chmod +x {name}")),
+                            );
                         }
                     }
                 }
             }
         }
     }
-
-    // Suppress unused variable warning on non-Unix.
-    let _ = dir;
-
     diags
+}
+
+/// Non-Unix stub: script permission checks are not applicable.
+#[cfg(not(unix))]
+fn check_script_permissions_impl(_dir: &Path) -> Vec<Diagnostic> {
+    Vec::new()
 }
 
 /// S004: Check for excessive directory nesting depth.

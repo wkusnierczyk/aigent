@@ -876,8 +876,10 @@ fn format_doc_catalog(entries: &[aigent::SkillEntry]) -> String {
         out.push_str(&format!("> {}\n", entry.description));
 
         // Read full properties for optional fields.
+        // entry.location is a file path to SKILL.md; read_properties expects the parent directory.
         let loc_path = std::path::Path::new(&entry.location);
-        if let Ok(props) = aigent::read_properties(loc_path) {
+        let skill_dir = loc_path.parent().unwrap_or(loc_path);
+        if let Ok(props) = aigent::read_properties(skill_dir) {
             if let Some(compat) = &props.compatibility {
                 out.push_str(&format!("\n**Compatibility**: {compat}\n"));
             }
@@ -1005,8 +1007,8 @@ fn run_upgrade(
                     }
 
                     if !has_version || !has_author {
-                        // Only add metadata block if no metadata: key exists at all.
                         if meta_block.is_none() {
+                            // No metadata block at all — add the entire block.
                             updated_yaml.push_str("\nmetadata:");
                             if !has_version {
                                 updated_yaml.push_str("\n  version: '0.1.0'");
@@ -1014,6 +1016,25 @@ fn run_upgrade(
                             if !has_author {
                                 updated_yaml.push_str("\n  author: unknown");
                             }
+                        } else {
+                            // Partial metadata exists — append missing keys under it.
+                            // Find the metadata: line and insert after it.
+                            let lines: Vec<&str> = updated_yaml.lines().collect();
+                            let mut new_yaml = String::new();
+                            for line in &lines {
+                                new_yaml.push_str(line);
+                                new_yaml.push('\n');
+                                if line.trim_start().starts_with("metadata:") {
+                                    if !has_version {
+                                        new_yaml.push_str("  version: '0.1.0'\n");
+                                    }
+                                    if !has_author {
+                                        new_yaml.push_str("  author: unknown\n");
+                                    }
+                                }
+                            }
+                            // Remove trailing newline to match expected format.
+                            updated_yaml = new_yaml.trim_end_matches('\n').to_string();
                         }
                     }
 
