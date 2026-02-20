@@ -244,6 +244,27 @@ pub fn read_properties(dir: &Path) -> Result<SkillProperties> {
     })
 }
 
+/// Read the markdown body (post-frontmatter) from a skill directory.
+///
+/// Locates the SKILL.md file, reads its content, parses the frontmatter,
+/// and returns the body portion. Returns an empty string if the file
+/// cannot be found, read, or parsed.
+#[must_use]
+pub fn read_body(dir: &Path) -> String {
+    let path = match find_skill_md(dir) {
+        Some(p) => p,
+        None => return String::new(),
+    };
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return String::new(),
+    };
+    match parse_frontmatter(&content) {
+        Ok((_, body)) => body,
+        Err(_) => String::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

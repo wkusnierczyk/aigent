@@ -58,7 +58,9 @@ pub use fixer::apply_fixes;
 pub use linter::lint;
 #[doc(inline)]
 pub use models::SkillProperties;
-pub use parser::{find_skill_md, parse_frontmatter, read_properties, CLAUDE_CODE_KEYS, KNOWN_KEYS};
+pub use parser::{
+    find_skill_md, parse_frontmatter, read_body, read_properties, CLAUDE_CODE_KEYS, KNOWN_KEYS,
+};
 pub use prompt::{
     collect_skills, estimate_tokens, format_budget, to_prompt, to_prompt_format, PromptFormat,
     SkillEntry,
