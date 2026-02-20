@@ -51,7 +51,7 @@ pub fn validate_structure(dir: &Path) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
 
     // Read the SKILL.md body for reference checking.
-    let body = read_body(dir);
+    let body = crate::parser::read_body(dir);
 
     // S001 + S003: Check file references in the body.
     diags.extend(check_references(dir, &body));
@@ -226,22 +226,6 @@ fn check_nesting_recursive(root: &Path, current: &Path, depth: usize, diags: &mu
             }
             check_nesting_recursive(root, &path, depth + 1, diags);
         }
-    }
-}
-
-/// Read the SKILL.md body for reference checking.
-fn read_body(dir: &Path) -> String {
-    let path = match crate::parser::find_skill_md(dir) {
-        Some(p) => p,
-        None => return String::new(),
-    };
-    let content = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return String::new(),
-    };
-    match crate::parser::parse_frontmatter(&content) {
-        Ok((_, body)) => body,
-        Err(_) => String::new(),
     }
 }
 

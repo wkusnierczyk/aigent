@@ -107,7 +107,7 @@ pub fn score(dir: &Path) -> ScoreResult {
     // Only run lint checks if the skill is parseable (no infrastructure errors).
     let quality = match crate::parser::read_properties(dir) {
         Ok(props) => {
-            let body = read_body(dir);
+            let body = crate::parser::read_body(dir);
             let lint_diags = linter::lint(&props, &body);
             score_quality(&lint_diags)
         }
@@ -325,22 +325,6 @@ fn all_quality_checks_failed() -> CategoryResult {
                 message: Some("Skill could not be parsed".to_string()),
             },
         ],
-    }
-}
-
-/// Read the SKILL.md body (post-frontmatter) for lint scoring.
-fn read_body(dir: &Path) -> String {
-    let path = match crate::parser::find_skill_md(dir) {
-        Some(p) => p,
-        None => return String::new(),
-    };
-    let content = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return String::new(),
-    };
-    match crate::parser::parse_frontmatter(&content) {
-        Ok((_, body)) => body,
-        Err(_) => String::new(),
     }
 }
 

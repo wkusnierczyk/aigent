@@ -278,7 +278,7 @@ fn main() {
                 // Append lint results if requested.
                 if lint {
                     if let Ok(props) = aigent::read_properties(dir) {
-                        let body = read_body(dir);
+                        let body = aigent::read_body(dir);
                         diags.extend(aigent::lint(&props, &body));
                     }
                 }
@@ -377,7 +377,7 @@ fn main() {
             let dir = resolve_skill_dir(&skill_dir);
             let diags = match aigent::read_properties(&dir) {
                 Ok(props) => {
-                    let body = read_body(&dir);
+                    let body = aigent::read_body(&dir);
                     aigent::lint(&props, &body)
                 }
                 Err(e) => {
@@ -824,7 +824,7 @@ fn run_validation_pass(
 
         if lint {
             if let Ok(props) = aigent::read_properties(dir) {
-                let body = read_body(dir);
+                let body = aigent::read_body(dir);
                 diags.extend(aigent::lint(&props, &body));
             }
         }
@@ -895,25 +895,6 @@ fn format_doc_catalog(entries: &[aigent::SkillEntry]) -> String {
     out
 }
 
-/// Read the SKILL.md body (post-frontmatter) for linting.
-///
-/// Returns an empty string if the file can't be read or parsed.
-fn read_body(dir: &std::path::Path) -> String {
-    let path = aigent::find_skill_md(dir);
-    let path = match path {
-        Some(p) => p,
-        None => return String::new(),
-    };
-    let content = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return String::new(),
-    };
-    match aigent::parse_frontmatter(&content) {
-        Ok((_, body)) => body,
-        Err(_) => String::new(),
-    }
-}
-
 /// Run upgrade analysis on a skill directory.
 ///
 /// Checks for missing best-practice fields and returns a list of human-readable
@@ -977,7 +958,7 @@ fn run_upgrade(
     }
 
     // Check body length.
-    let body = read_body(dir);
+    let body = aigent::read_body(dir);
     let line_count = body.lines().count();
     if line_count > 500 {
         suggestions.push(format!(
