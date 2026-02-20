@@ -506,6 +506,9 @@ fn main() {
             };
             match result {
                 Ok(result) => {
+                    for w in &result.warnings {
+                        eprintln!("warning: {w}");
+                    }
                     println!(
                         "Created skill '{}' at {}",
                         result.properties.name,
