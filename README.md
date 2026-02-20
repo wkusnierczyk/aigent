@@ -1,23 +1,15 @@
-<p align="center">
-  <img src="graphics/aigent.png" alt="aigent logo" width="200">
-</p>
-
-<h1 align="center">aigent</h1>
-
-<p align="center">
-  AI agent skill builder and validator — a Rust library, CLI, and Claude Code
-  plugin for managing SKILL.md files following the
-  <a href="https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices">Anthropic agent skill specification</a>.
-</p>
-
-<p align="center">
-  <a href="https://github.com/wkusnierczyk/aigent/actions/workflows/ci.yml"><img src="https://github.com/wkusnierczyk/aigent/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://crates.io/crates/aigent"><img src="https://img.shields.io/crates/v/aigent" alt="Crates.io"></a>
-  <a href="https://docs.rs/aigent"><img src="https://docs.rs/aigent/badge.svg" alt="docs.rs"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
-</p>
-
----
+<table>
+  <tr>
+    <td>
+      <img src="https://raw.githubusercontent.com/wkusnierczyk/aigent-skills/main/graphics/aigent.png" alt="logo" width="300" />
+    </td>
+    <td>
+      <p><strong>aigent</strong>:
+      A library and CLI tool for managing AI agent skill definitions.</p>
+      <p>Validates, parses, and generates prompts from skill metadata stored in <code>SKILL.md</code> files with YAML frontmatter. Also provides a skill builder for creating new skills from natural language specifications.</p>
+    </td>
+  </tr>
+</table>
 
 ## Table of Contents
 
