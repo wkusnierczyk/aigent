@@ -129,6 +129,21 @@ pub const KNOWN_KEYS: &[&str] = &[
     "allowed-tools",
 ];
 
+/// Claude Code extension fields (recognized with `--target claude-code`).
+///
+/// These fields are not part of the base Anthropic specification but are
+/// recognized by Claude Code. Placed alongside `KNOWN_KEYS` as both define
+/// known metadata fields.
+pub const CLAUDE_CODE_KEYS: &[&str] = &[
+    "disable-model-invocation",
+    "user-invocable",
+    "context",
+    "agent",
+    "model",
+    "hooks",
+    "argument-hint",
+];
+
 /// Extract a required string field from metadata.
 ///
 /// Returns `AigentError::Validation` if the key is missing or not a string.

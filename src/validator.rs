@@ -10,21 +10,10 @@ use crate::diagnostics::{
     Diagnostic, Severity, ValidationTarget, E000, E001, E002, E003, E004, E005, E006, E007, E009,
     E010, E011, E012, E013, E014, E015, E016, E017, E018, W001, W002,
 };
-use crate::parser::{find_skill_md, parse_frontmatter, KNOWN_KEYS};
+use crate::parser::{find_skill_md, parse_frontmatter, CLAUDE_CODE_KEYS, KNOWN_KEYS};
 
 /// Reserved words that must not appear as hyphen-delimited segments in a skill name.
 const RESERVED_WORDS: &[&str] = &["anthropic", "claude"];
-
-/// Claude Code extension fields (recognized with `--target claude-code`).
-pub const CLAUDE_CODE_KEYS: &[&str] = &[
-    "disable-model-invocation",
-    "user-invocable",
-    "context",
-    "agent",
-    "model",
-    "hooks",
-    "argument-hint",
-];
 
 /// Regex for detecting XML/HTML tags in strings.
 ///
@@ -102,6 +91,10 @@ fn validate_name(name: &str, dir: Option<&Path>) -> Vec<Diagnostic> {
     }
 
     // 3. Character validation: a-z, 0-9, hyphen, or alphabetic non-uppercase.
+    //    Collect invalid chars and uppercase chars separately so we can emit
+    //    one E003 diagnostic per category rather than one per character.
+    let mut invalid_chars: Vec<char> = Vec::new();
+    let mut has_uppercase = false;
     for c in normalized.chars() {
         if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' {
             continue;
@@ -109,18 +102,31 @@ fn validate_name(name: &str, dir: Option<&Path>) -> Vec<Diagnostic> {
         if c.is_alphabetic() && !c.is_uppercase() {
             continue;
         }
-        let mut diag = Diagnostic::new(
-            Severity::Error,
-            E003,
-            format!("name contains invalid character: '{c}'"),
-        )
-        .with_field("name");
-        // Suggest lowercase if the character is uppercase.
         if c.is_uppercase() {
-            let lower: String = c.to_lowercase().collect();
-            diag = diag.with_suggestion(format!("Use lowercase: '{lower}'"));
+            has_uppercase = true;
+        } else {
+            invalid_chars.push(c);
         }
-        diags.push(diag);
+    }
+    // Emit one diagnostic for uppercase characters.
+    if has_uppercase {
+        let lowered = normalized.to_lowercase();
+        diags.push(
+            Diagnostic::new(Severity::Error, E003, "name contains uppercase characters")
+                .with_field("name")
+                .with_suggestion(format!("Use lowercase: '{lowered}'")),
+        );
+    }
+    // Emit one diagnostic per truly invalid (non-uppercase) character.
+    for c in invalid_chars {
+        diags.push(
+            Diagnostic::new(
+                Severity::Error,
+                E003,
+                format!("name contains invalid character: '{c}'"),
+            )
+            .with_field("name"),
+        );
     }
 
     // 4. No leading hyphen.
@@ -519,9 +525,10 @@ mod tests {
     fn name_with_uppercase() {
         let meta = make_metadata(&[("name", "MySkill"), ("description", "desc")]);
         let diags = validate_metadata(&meta, None);
-        assert!(diags
-            .iter()
-            .any(|d| d.message.contains("invalid character")));
+        assert!(diags.iter().any(|d| d.message.contains("uppercase")));
+        // Should be a single E003 diagnostic, not one per character.
+        let e003_count = diags.iter().filter(|d| d.code == E003).count();
+        assert_eq!(e003_count, 1, "expected single E003, got {e003_count}");
     }
 
     #[test]
@@ -722,10 +729,8 @@ mod tests {
         let meta = make_metadata(&[("name", "Навык"), ("description", "desc")]);
         let diags = validate_metadata(&meta, None);
         assert!(
-            diags
-                .iter()
-                .any(|d| d.message.contains("invalid character")),
-            "expected error for uppercase Cyrillic, got: {diags:?}"
+            diags.iter().any(|d| d.code == E003),
+            "expected E003 for uppercase Cyrillic, got: {diags:?}"
         );
     }
 

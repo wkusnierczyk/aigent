@@ -619,7 +619,8 @@ fn validate_recursive_no_skills_found() {
     aigent()
         .args(["validate", parent.path().to_str().unwrap(), "--recursive"])
         .assert()
-        .failure(); // no dirs → usage error
+        .failure()
+        .stderr(predicate::str::contains("No SKILL.md files found"));
 }
 
 // ── --apply-fixes flag ─────────────────────────────────────────────

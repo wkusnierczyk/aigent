@@ -49,11 +49,11 @@ pub use fixer::apply_fixes;
 pub use linter::lint;
 #[doc(inline)]
 pub use models::SkillProperties;
-pub use parser::{find_skill_md, parse_frontmatter, read_properties, KNOWN_KEYS};
+pub use parser::{find_skill_md, parse_frontmatter, read_properties, CLAUDE_CODE_KEYS, KNOWN_KEYS};
 pub use prompt::to_prompt;
 pub use validator::{
     discover_skills, known_keys_for, validate, validate_metadata, validate_metadata_with_target,
-    validate_with_target, CLAUDE_CODE_KEYS,
+    validate_with_target,
 };
 
 #[doc(inline)]

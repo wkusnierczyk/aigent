@@ -133,7 +133,11 @@ fn main() {
             // Resolve directories: expand --recursive, resolve file paths.
             let dirs = resolve_dirs(&skill_dirs, recursive);
             if dirs.is_empty() {
-                eprintln!("Usage: aigent validate <skill-dir> [<skill-dir>...]");
+                if recursive {
+                    eprintln!("No SKILL.md files found under the specified path(s).");
+                } else {
+                    eprintln!("Usage: aigent validate <skill-dir> [<skill-dir>...]");
+                }
                 std::process::exit(1);
             }
 

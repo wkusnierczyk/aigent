@@ -15,11 +15,11 @@ use crate::parser::find_skill_md;
 
 /// Regex for matching the `name` field line in frontmatter.
 static NAME_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?m)^name:\s*(.+)$").expect("name regex must compile"));
+    LazyLock::new(|| Regex::new(r"(?m)^name:\s*(.*)$").expect("name regex must compile"));
 
 /// Regex for matching the `description` field line in frontmatter.
 static DESCRIPTION_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?m)^description:\s*(.+)$").expect("description regex must compile")
+    Regex::new(r"(?m)^description:\s*(.*)$").expect("description regex must compile")
 });
 
 /// Regex for matching XML/HTML tags.
@@ -196,13 +196,12 @@ mod tests {
             "myskill",
             "---\nname: MySkill\ndescription: A valid skill\n---\n",
         );
-        let diags = vec![Diagnostic::new(
-            Severity::Error,
-            E003,
-            "name contains invalid character: 'M'",
-        )
-        .with_field("name")
-        .with_suggestion("Use lowercase: 'm'")];
+        let diags =
+            vec![
+                Diagnostic::new(Severity::Error, E003, "name contains uppercase characters")
+                    .with_field("name")
+                    .with_suggestion("Use lowercase: 'myskill'"),
+            ];
 
         let count = apply_fixes(&dir, &diags).unwrap();
         assert_eq!(count, 1);
@@ -211,6 +210,28 @@ mod tests {
         assert!(
             content.contains("name: myskill"),
             "name should be lowercased: {content}"
+        );
+    }
+
+    #[test]
+    fn apply_fixes_e002_truncate_name() {
+        // Create a name longer than 64 characters with hyphens for truncation.
+        let long_name = format!("a-{}-z", "b".repeat(62));
+        let content = format!("---\nname: {long_name}\ndescription: A valid skill\n---\n");
+        let (_parent, dir) = make_skill_dir("truncated", &content);
+        let diags = vec![
+            Diagnostic::new(Severity::Error, E002, "name exceeds 64 characters")
+                .with_field("name")
+                .with_suggestion("Truncate to: 'a'"),
+        ];
+
+        let count = apply_fixes(&dir, &diags).unwrap();
+        assert_eq!(count, 1);
+
+        let result = fs::read_to_string(dir.join("SKILL.md")).unwrap();
+        assert!(
+            result.contains("name: a"),
+            "name should be truncated: {result}"
         );
     }
 
@@ -286,29 +307,20 @@ mod tests {
     }
 
     #[test]
-    fn apply_fixes_multiple_e003_on_same_field_counts_one() {
-        // "MySkill" has two uppercase chars (M and S), generating two E003
-        // diagnostics. Only one fix is applied because the second lowercase
-        // operation produces no change.
+    fn apply_fixes_duplicate_e003_counts_one() {
+        // Defensive test: if two E003 diagnostics are provided for the same
+        // field, the fixer should only count one actual change.
         let (_parent, dir) = make_skill_dir(
             "myskill",
             "---\nname: MySkill\ndescription: A valid skill\n---\n",
         );
         let diags = vec![
-            Diagnostic::new(
-                Severity::Error,
-                E003,
-                "name contains invalid character: 'M'",
-            )
-            .with_field("name")
-            .with_suggestion("Use lowercase: 'm'"),
-            Diagnostic::new(
-                Severity::Error,
-                E003,
-                "name contains invalid character: 'S'",
-            )
-            .with_field("name")
-            .with_suggestion("Use lowercase: 's'"),
+            Diagnostic::new(Severity::Error, E003, "name contains uppercase characters")
+                .with_field("name")
+                .with_suggestion("Use lowercase: 'myskill'"),
+            Diagnostic::new(Severity::Error, E003, "name contains uppercase characters")
+                .with_field("name")
+                .with_suggestion("Use lowercase: 'myskill'"),
         ];
 
         let count = apply_fixes(&dir, &diags).unwrap();
