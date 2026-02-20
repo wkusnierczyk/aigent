@@ -1,0 +1,65 @@
+#!/bin/sh
+set -eu
+
+# aigent install script
+# Downloads the latest aigent binary from GitHub Releases.
+# Usage: curl -fsSL https://raw.githubusercontent.com/wkusnierczyk/aigent/main/install.sh | sh
+
+REPO="wkusnierczyk/aigent"
+INSTALL_DIR="${HOME}/.local/bin"
+
+# Detect OS
+OS="$(uname -s)"
+case "$OS" in
+  Linux)  OS_TARGET="unknown-linux-gnu" ;;
+  Darwin) OS_TARGET="apple-darwin" ;;
+  *)      echo "Error: unsupported OS: $OS" >&2; exit 1 ;;
+esac
+
+# Detect architecture
+ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64)         ARCH_TARGET="x86_64" ;;
+  aarch64|arm64)  ARCH_TARGET="aarch64" ;;
+  *)              echo "Error: unsupported architecture: $ARCH" >&2; exit 1 ;;
+esac
+
+TARGET="${ARCH_TARGET}-${OS_TARGET}"
+
+# Get latest release tag by following the redirect from /releases/latest
+VERSION=$(curl -fsSI "https://github.com/${REPO}/releases/latest" \
+  | grep -i '^location:' | sed 's|.*/tag/||;s/[[:space:]]*$//')
+
+if [ -z "$VERSION" ]; then
+  echo "Error: failed to determine latest version" >&2
+  exit 1
+fi
+
+# Download and install
+ASSET="aigent-${VERSION}-${TARGET}.tar.gz"
+URL="https://github.com/${REPO}/releases/download/${VERSION}/${ASSET}"
+
+echo "Installing aigent ${VERSION} for ${TARGET}..."
+mkdir -p "$INSTALL_DIR"
+
+if ! curl -fsSL "$URL" | tar xz -C "$INSTALL_DIR"; then
+  echo "Error: download failed — check that a release exists for ${TARGET}" >&2
+  exit 1
+fi
+
+chmod +x "${INSTALL_DIR}/aigent"
+
+# Verify
+if "${INSTALL_DIR}/aigent" --version > /dev/null 2>&1; then
+  INSTALLED_VERSION=$("${INSTALL_DIR}/aigent" --version)
+  echo "Installed ${INSTALLED_VERSION} to ${INSTALL_DIR}/aigent"
+else
+  echo "Error: installation failed — binary not functional" >&2
+  exit 1
+fi
+
+# PATH hint
+case ":${PATH}:" in
+  *":${INSTALL_DIR}:"*) ;;
+  *) echo "Add ${INSTALL_DIR} to your PATH if not already present." ;;
+esac
