@@ -187,18 +187,30 @@ fn hooks_json_exists_and_valid() {
     let content = fs::read_to_string("hooks/hooks.json").expect("hooks/hooks.json should exist");
     let json: serde_json::Value =
         serde_json::from_str(&content).expect("hooks.json should be valid JSON");
-    assert!(json.is_array(), "hooks.json should be an array");
+    assert!(json.is_object(), "hooks.json should be a JSON object");
+    assert!(
+        json.get("hooks").is_some(),
+        "hooks.json should have a top-level 'hooks' key"
+    );
 }
 
 #[test]
 fn hooks_json_has_post_tool_use() {
     let content = fs::read_to_string("hooks/hooks.json").unwrap();
     let json: serde_json::Value = serde_json::from_str(&content).unwrap();
-    let arr = json.as_array().unwrap();
-    assert!(!arr.is_empty(), "hooks.json should have at least one hook");
-    assert_eq!(
-        arr[0]["type"], "PostToolUse",
-        "first hook should be PostToolUse"
+    let hooks = json["hooks"]
+        .as_object()
+        .expect("hooks should be an object");
+    assert!(
+        hooks.contains_key("PostToolUse"),
+        "hooks should contain PostToolUse event"
+    );
+    let post_tool_use = hooks["PostToolUse"]
+        .as_array()
+        .expect("PostToolUse should be an array");
+    assert!(
+        !post_tool_use.is_empty(),
+        "PostToolUse should have at least one matcher group"
     );
 }
 
@@ -208,6 +220,19 @@ fn hooks_json_targets_write_and_edit() {
     assert!(
         content.contains("Write") && content.contains("Edit"),
         "hooks should target Write and Edit tools"
+    );
+}
+
+#[test]
+fn hooks_json_reads_input_from_stdin() {
+    let content = fs::read_to_string("hooks/hooks.json").unwrap();
+    assert!(
+        !content.contains("$TOOL_INPUT"),
+        "hooks should read input from stdin via jq, not from $TOOL_INPUT env variable"
+    );
+    assert!(
+        content.contains(".tool_input.file_path"),
+        "hooks should extract file_path from stdin JSON via jq"
     );
 }
 
