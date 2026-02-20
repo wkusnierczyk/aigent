@@ -360,3 +360,292 @@ should be addressed regardless of scope decision.
 - [ ] Finding 7 noted: document token budget heuristic limitations
 - [ ] Finding 9 resolved: keep `KNOWN_KEYS` as deprecated alias
 - [ ] Finding 10 resolved: specify `ValidationTarget` module location
+
+---
+
+# M10: Improvements and Extensions — Code Review
+
+## Verification
+
+| Check               | Result |
+|----------------------|--------|
+| `cargo fmt --check`  | ✅ Clean |
+| `cargo clippy -- -D warnings` | ✅ Clean |
+| `cargo test`         | ✅ 268 passed (213 unit + 41 cli + 13 plugin + 1 doc-test) |
+| `cargo doc --no-deps` | ✅ Clean |
+
+Test count growth: 183 (M9) → 268 (M10) = **+85 tests**.
+
+## Scope
+
+The original M10 plan (22 issues, 7 waves, 15 agents) was split per plan review
+Finding 1 into three milestones:
+
+- **M10** (this branch): 5 issues (#50, #51, #52, #53, #66) — structured
+  diagnostics, linting, batch validation, fix-it, Claude Code awareness.
+- **M11**: 8 issues (deferred — templates, prompt format, budget, checksum,
+  hooks, scorer, fork).
+- **M12**: 9 issues (deferred — interactive, score, doc, watch, diff, directory
+  structure, upgrade, tester, cross-skill, README).
+
+The revised plan is appended to `dev/m10/plan.md` (lines 1152–1498).
+
+## Changed Files
+
+| File | Lines | Status | Summary |
+|------|-------|--------|---------|
+| `src/diagnostics.rs` | 293 | **New** | `Severity`, `Diagnostic`, error code constants, `ValidationTarget` |
+| `src/linter.rs` | 401 | **New** | 5 semantic lint checks (I001–I005) |
+| `src/fixer.rs` | 271 | **New** | Auto-fix for E002, E003, E006, E012 |
+| `src/lib.rs` | 64 | Modified | New module declarations and re-exports |
+| `src/errors.rs` | 186 | Modified | `Validation { errors: Vec<Diagnostic> }` |
+| `src/main.rs` | 385 | Modified | `Validate` multi-dir, `--format/--target/--lint/--recursive/--apply-fixes`, new `Lint` subcommand |
+| `src/parser.rs` | — | Modified | `require_string`/`optional_string` return `Diagnostic` |
+| `src/validator.rs` | 1030 | Modified | Returns `Vec<Diagnostic>`, `ValidationTarget` support, `discover_skills()` |
+| `src/builder/mod.rs` | — | Modified | Uses `d.is_error()` instead of string prefix |
+| `tests/cli.rs` | +295 | Modified | 18 new integration tests |
+| `dev/m10/plan.md` | 1498 | Modified | Revised plan appended |
+
+## Plan Review Finding Resolution
+
+| # | Severity | Finding | Status | Notes |
+|---|----------|---------|--------|-------|
+| 1 | High | Scope too large | ✅ Addressed | Split into M10/M11/M12 |
+| 2 | High | Breaking API (`Vec<String>` → `Vec<Diagnostic>`) | ⚠️ Accepted | Version remains 0.1.0; semver allows pre-1.0 breaks |
+| 3 | Medium | `--apply-fixes` needs preview/dry-run | ❌ Not addressed | No `--dry-run`, backup, or confirmation mechanism |
+| 4 | Medium | Watch mode `notify` dependency | N/A | Deferred to M12 |
+| 5 | Medium | Hook shell command fragility | N/A | Deferred to M11 |
+| 6 | Medium | Scorer `allowed-tools` | N/A | Deferred to M11 |
+| 7 | Medium | Token budget heuristic | N/A | Deferred to M11 |
+| 8 | Low | `template.rs` rename | N/A | Deferred to M11 |
+| 9 | Low | `KNOWN_KEYS` rename | ✅ Simpler approach | `KNOWN_KEYS` kept unchanged; `CLAUDE_CODE_KEYS` added in validator.rs — no break, no deprecated alias needed |
+| 10 | Low | `ValidationTarget` module location | ✅ Addressed | Placed in `diagnostics.rs` as recommended |
+| 11 | Low | Interactive mode testability | N/A | Deferred to M12 |
+| 12 | Low | Batch JSON summary | ⚠️ Partial | Multi-dir text summary exists; JSON outputs flat array (single) or array-of-objects (multi) but no summary object |
+
+## Code Findings
+
+### Finding 1 (Medium): `"E000"` used as unregistered catch-all error code
+
+**Location**: `src/validator.rs:347,359,368`, `src/parser.rs:145,152,172`
+
+Six infrastructure-level failures use the string literal `"E000"` as their error
+code — but `E000` is not declared as a constant in `diagnostics.rs` and is not
+part of the error code registry. These are:
+
+1. "SKILL.md not found" (validator.rs:347)
+2. "IO error: {e}" (validator.rs:359)
+3. Parse error pass-through (validator.rs:368)
+4. YAML parse error (parser.rs:145)
+5. YAML structure error (parser.rs:152)
+6. Missing frontmatter (parser.rs:172)
+
+These are not validation errors per se — they are precondition failures that
+prevent validation from running. Using an unregistered code means:
+- `E000` is not documented or discoverable.
+- Users cannot reliably filter/suppress it.
+- It could collide with a future registered code.
+
+**Recommendation**: Register `E000` in `diagnostics.rs` with a doc comment like
+`/// Infrastructure/precondition error (file not found, IO, parse)`, or define
+E019/E020 for these categories. Alternatively, return
+`Result<Vec<Diagnostic>, AigentError>` from `validate_with_target()` to
+separate precondition failures from validation results — but that would be a
+larger refactor.
+
+### Finding 2 (Low): `_body` parameter unused in `lint()` function
+
+**Location**: `src/linter.rs:51`
+
+```rust
+pub fn lint(properties: &SkillProperties, _body: &str) -> Vec<Diagnostic>
+```
+
+The body parameter is accepted but prefixed with `_` to suppress the unused
+warning. The five current lint checks only inspect `SkillProperties`. This is
+a forward-looking API design (body-based checks like "check for TODO markers"
+or "verify example blocks" are likely in M11/M12), but for now it means every
+caller must construct a body string that is never read.
+
+No action needed — this is an intentional API reservation. The `read_body()`
+helper in `main.rs` already handles extraction for when body-based checks
+arrive.
+
+### Finding 3 (Low): Regex compiled on every fixer call — no caching
+
+**Location**: `src/fixer.rs:95,102,111,112`
+
+The `fix_frontmatter_field()`, `lowercase_name_in_frontmatter()`, and
+`strip_xml_from_description()` functions call `Regex::new()` on every
+invocation. The linter module uses `LazyLock<Regex>` for its pattern (line 42),
+but the fixer does not follow the same pattern.
+
+For a tool invoked once per CLI call this is functionally fine — regex
+compilation is ~microseconds. But the inconsistency between modules is notable.
+The linter's approach (`static LazyLock`) is the idiomatic Rust pattern for
+compiled-once regexes.
+
+**Recommendation**: Consider migrating to `LazyLock` for consistency with
+`linter.rs`. Low priority — no functional impact.
+
+### Finding 4 (Low): `E008` reserved but no constant defined
+
+**Location**: `src/diagnostics.rs:117`
+
+The comment says `// E008 reserved for name XML tags (caught by E003 character
+validation).` but no `pub const E008` is defined. This means the reservation
+exists only as a comment — there is no compile-time enforcement. If a future
+change adds a new error code and accidentally uses "E008", the comment would
+be the only safeguard.
+
+**Recommendation**: Define `pub const E008: &str = "E008";` with a doc comment
+marking it as reserved. This costs nothing and makes the reservation visible in
+code completion and `cargo doc`.
+
+### Finding 5 (Low): Multi-dir text summary counts "warnings" inconsistently
+
+**Location**: `src/main.rs:200–203`
+
+```rust
+let warnings = all_diags
+    .iter()
+    .filter(|(_, d)| {
+        d.iter().any(|d| d.is_warning()) && !d.iter().any(|d| d.is_error())
+    })
+    .count();
+```
+
+A directory that has both errors and warnings is counted only as "errors" — the
+warning count reflects directories with warnings *but no errors*. This is
+defensible (it's a "worst severity wins" model), but the label "warnings" is
+misleading. A directory with 3 errors and 2 warnings shows as an "error" in the
+summary, and its warnings are invisible.
+
+**Recommendation**: Either rename to clarify ("warnings-only") or count
+warnings independently. Low priority — the current approach matches common CI
+tool conventions.
+
+### Finding 6 (Low): `apply_fixes` writes silently — plan review Finding 3 unresolved
+
+**Location**: `src/fixer.rs:72–74`, `src/main.rs:148–159`
+
+The `--apply-fixes` flag applies fixes and writes to SKILL.md with only an
+stderr count message (`"Applied {count} fix(es) to ..."`). There is no:
+- `--dry-run` flag to preview changes
+- File backup before overwriting
+- Confirmation prompt
+- Diff output showing what changed
+
+This was flagged as plan review Finding 3 (Medium). The implementation does
+re-validate after fixing (main.rs:152), which is good — but the user cannot
+preview what will change before it happens.
+
+**Recommendation**: Add `--dry-run` in a follow-up (M11 or M12). For now,
+document that `--apply-fixes` modifies files in-place and recommend version
+control before use.
+
+## Observations
+
+1. **Core migration is complete**: Zero hits for `starts_with("warning: ")` in
+   `src/`. The entire codebase now uses `Diagnostic` for structured output. This
+   was the highest-value change and it is thoroughly implemented.
+
+2. **Error code registry is well-organized**: The E001–E018 / W001–W002 scheme
+   with doc comments on each constant makes the codes self-documenting. The
+   separation of lint codes (I001–I005) into `linter.rs` is a good modularity
+   choice — lint codes are orthogonal to validation codes.
+
+3. **`KNOWN_KEYS` approach is simpler than planned**: The plan called for
+   renaming `KNOWN_KEYS` → `STANDARD_KEYS` with a deprecated alias. The
+   implementation keeps `KNOWN_KEYS` unchanged and adds `CLAUDE_CODE_KEYS` in
+   `validator.rs`, combined via `known_keys_for(target)`. This avoids a breaking
+   change entirely — a better outcome than the plan's approach.
+
+4. **`ValidationTarget` placement matches recommendation**: Plan review Finding
+   10 recommended placing it in `diagnostics.rs`. The implementation does
+   exactly this, keeping it alongside `Severity` and `Diagnostic`.
+
+5. **Test coverage is comprehensive**: 85 new tests cover all new code paths.
+   The CLI integration tests exercise format, target, lint, recursive, and
+   apply-fixes flags. The fixer tests cover all 4 fixable error codes plus edge
+   cases (no suggestion, empty diagnostics, missing SKILL.md).
+
+6. **`discover_skills()` is a well-scoped utility**: It walks directories
+   recursively, skips hidden directories (`.git`, `.vscode`, etc.), and returns
+   sorted paths. The sorted output ensures deterministic test behavior across
+   platforms.
+
+7. **JSON output follows sensible conventions**: Single directory → flat array
+   of diagnostics. Multiple directories → array of `{path, diagnostics}`
+   objects. This avoids wrapping single-result queries in unnecessary structure.
+
+8. **The `Lint` subcommand is appropriately separate**: Rather than overloading
+   `validate --lint`, there is also a standalone `aigent lint <dir>` command.
+   This gives users a clean interface for quality-only checks without validation
+   noise. The `--lint` flag on `validate` combines both for CI use cases.
+
+9. **Builder integration is minimal and correct**: `builder/mod.rs` changes are
+   limited to replacing `starts_with("warning: ")` with `d.is_error()`. The
+   builder does not need to understand diagnostic codes — it only cares about
+   pass/fail.
+
+## Verdict
+
+**Ready to merge** — with one advisory.
+
+The structured diagnostics migration (X1/#66) is the central deliverable and it
+is thoroughly implemented. The `Diagnostic` type, error code registry, and
+`ValidationTarget` tiering provide a solid foundation for M11/M12 features. All
+plan review findings that apply to M10's scope are addressed (Finding 1: split,
+Finding 9: simpler approach, Finding 10: correct placement).
+
+The advisory concern is Finding 1 (`"E000"` catch-all): these 6 infrastructure
+errors should be registered or categorized before M11 adds more diagnostic
+consumers. This is not a blocker — the current behavior is correct — but the
+unregistered code is a minor inconsistency in an otherwise well-organized
+registry.
+
+Plan review Finding 3 (`--apply-fixes` safety) remains unaddressed. This should
+be tracked for M11 or M12.
+
+### Checklist
+
+- [x] `cargo fmt --check` passes
+- [x] `cargo clippy -- -D warnings` passes
+- [x] All 268 tests pass
+- [x] `cargo doc --no-deps` clean
+- [x] Core migration complete: `starts_with("warning: ")` → 0 hits
+- [x] Error code registry (E001–E018, W001–W002, I001–I005) documented
+- [x] `ValidationTarget` in `diagnostics.rs` (plan review Finding 10)
+- [x] `KNOWN_KEYS` unchanged, `CLAUDE_CODE_KEYS` added (plan review Finding 9)
+- [x] Plan split into M10/M11/M12 (plan review Finding 1)
+- [x] No new `unwrap()` in library code (convention)
+- [x] `#[must_use]` on `Diagnostic` helpers
+- [x] All public items have doc comments
+- [ ] Register `"E000"` or categorize infrastructure errors (advisory, non-blocking)
+- [ ] Add `--dry-run` for `--apply-fixes` (deferred, plan review Finding 3)
+
+## Additional Code Review (2026-02-20)
+
+### Findings
+
+1. Medium: `--format json` changes schema based on input count, which makes machine consumers brittle.
+   - References: `src/main.rs:211`, `src/main.rs:216`
+   - Single-dir output is `Vec<Diagnostic>`, multi-dir output is `Vec<{path, diagnostics}>`. A caller that always expects one shape will break when validating 1 vs N paths.
+   - Recommendation: Always emit one stable envelope for JSON (for example `[{path, diagnostics}]` even for one path), or add an explicit compatibility flag.
+
+2. Medium: `validate --recursive <path/to/SKILL.md>` fails with a usage error instead of validating that skill.
+   - References: `src/main.rs:358`, `src/main.rs:359`, `src/main.rs:135`, `src/validator.rs:404`
+   - `resolve_dirs()` passes file paths directly to `discover_skills()`, which expects directories (`read_dir` on file returns error, then no results). This is a surprising UX regression because non-recursive mode accepts SKILL.md file paths.
+   - Recommendation: In recursive mode, detect file inputs and resolve them via `resolve_skill_dir()` before discovery.
+
+3. Low: `--apply-fixes` reports inflated fix counts when multiple diagnostics map to the same edit.
+   - References: `src/fixer.rs:33`, `src/fixer.rs:52`, `src/fixer.rs:53`, `src/fixer.rs:72`
+   - For a name like `ABC`, validator emits multiple `E003` diagnostics; `apply_fixes()` lowercases the same field repeatedly and increments `fix_count` for each diagnostic, even though only one effective change is applied.
+   - Recommendation: Count unique field-level edits or increment only when `modified` actually changes.
+
+### Residual Testing Gaps
+
+1. No CLI integration test for recursive mode with an input file path (`SKILL.md`) to prevent the regression above.
+2. No CLI integration test that locks JSON output shape across one-path and multi-path validation invocations.
+3. No fixer test asserting count semantics when multiple diagnostics target the same field.
