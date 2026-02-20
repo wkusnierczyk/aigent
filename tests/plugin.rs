@@ -77,6 +77,17 @@ fn plugin_version_matches_cargo_version() {
     );
 }
 
+#[test]
+fn changes_md_has_entry_for_current_version() {
+    let content = fs::read_to_string("CHANGES.md").expect("CHANGES.md should exist");
+    let cargo_version = env!("CARGO_PKG_VERSION");
+    let expected_header = format!("## [{cargo_version}]");
+    assert!(
+        content.contains(&expected_header),
+        "CHANGES.md must contain a '{expected_header}' entry matching Cargo.toml version ({cargo_version})"
+    );
+}
+
 // ── Skill content tests ─────────────────────────────────────────────
 
 #[test]
