@@ -4,18 +4,24 @@ use std::collections::HashMap;
 /// Parsed properties from a SKILL.md frontmatter.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SkillProperties {
+    /// Skill name (kebab-case, ≤ 64 characters).
     pub name: String,
+    /// Human-readable description (≤ 1024 characters).
     pub description: String,
 
+    /// License identifier (e.g., `"MIT"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
 
+    /// Compatibility string (e.g., `"Claude 3.5 and above"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compatibility: Option<String>,
 
+    /// Comma-separated list of allowed tools (e.g., `"Bash, Read"`).
     #[serde(rename = "allowed-tools", skip_serializing_if = "Option::is_none")]
     pub allowed_tools: Option<String>,
 
+    /// Arbitrary key-value metadata.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, serde_yaml_ng::Value>>,
 }

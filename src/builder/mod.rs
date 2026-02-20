@@ -1,8 +1,14 @@
+/// Deterministic (zero-config) skill generation heuristics.
 pub mod deterministic;
+/// LLM-enhanced skill generation and provider trait.
 pub mod llm;
+/// LLM provider implementations (Anthropic, OpenAI, Google, Ollama).
 pub mod providers;
+/// Template generation for `init` command.
 pub mod template;
 mod util;
+
+pub use llm::LlmProvider;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -13,18 +19,22 @@ use crate::parser::find_skill_md;
 use crate::validator::validate;
 
 use deterministic::{generate_body, generate_description};
-use llm::{
-    detect_provider, llm_derive_name, llm_generate_body, llm_generate_description, LlmProvider,
-};
+use llm::{detect_provider, llm_derive_name, llm_generate_body, llm_generate_description};
 
 /// User input for skill generation.
 #[derive(Debug, Clone, Default)]
 pub struct SkillSpec {
+    /// Natural language description of what the skill should do.
     pub purpose: String,
+    /// Explicit skill name override. If `None`, derived from `purpose`.
     pub name: Option<String>,
+    /// Allowed tools (e.g., `"Bash, Read"`).
     pub tools: Option<String>,
+    /// Compatibility string (e.g., `"Claude 3.5 and above"`).
     pub compatibility: Option<String>,
+    /// License identifier (e.g., `"MIT"`).
     pub license: Option<String>,
+    /// Additional files to write alongside SKILL.md, keyed by relative path.
     pub extra_files: Option<HashMap<String, String>>,
     /// Output directory override. If `None`, derived from the skill name.
     pub output_dir: Option<PathBuf>,
@@ -35,15 +45,20 @@ pub struct SkillSpec {
 /// Result of skill generation.
 #[derive(Debug)]
 pub struct BuildResult {
+    /// Parsed properties from the generated SKILL.md frontmatter.
     pub properties: SkillProperties,
+    /// All files written, keyed by relative path (includes `SKILL.md`).
     pub files: HashMap<String, String>,
+    /// Directory where the skill was created.
     pub output_dir: PathBuf,
 }
 
 /// Clarity assessment result.
 #[derive(Debug)]
 pub struct ClarityAssessment {
+    /// Whether the purpose description is clear enough for generation.
     pub clear: bool,
+    /// Follow-up questions to ask if not clear (empty when `clear` is true).
     pub questions: Vec<String>,
 }
 
