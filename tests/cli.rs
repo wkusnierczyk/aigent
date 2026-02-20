@@ -50,7 +50,9 @@ fn about_flag() {
         .stdout(predicate::str::contains("aigent:"))
         .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")))
         .stdout(predicate::str::contains("author:"))
-        .stdout(predicate::str::contains(env!("CARGO_PKG_LICENSE")));
+        .stdout(predicate::str::contains("developer:"))
+        .stdout(predicate::str::contains("licence:"))
+        .stdout(predicate::str::contains("https://opensource.org/licenses/"));
 }
 
 #[test]
@@ -936,6 +938,332 @@ fn init_with_template_claude_code() {
         .success();
     let content = fs::read_to_string(dir.join("SKILL.md")).unwrap();
     assert!(content.contains("user-invocable: true"));
+}
+
+// ── M12: score subcommand ──────────────────────────────────────────
+
+#[test]
+fn score_perfect_skill_exits_zero() {
+    let (_parent, dir) = make_skill_dir(
+        "processing-pdfs",
+        "---\nname: processing-pdfs\ndescription: >-\n  Processes PDF files and generates detailed reports.\n  Use when working with documents.\n---\nBody.\n",
+    );
+    aigent()
+        .args(["score", dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Score: 100/100"));
+}
+
+#[test]
+fn score_imperfect_skill_exits_nonzero() {
+    let (_parent, dir) = make_skill_dir(
+        "helper",
+        "---\nname: helper\ndescription: Helps\n---\nBody.\n",
+    );
+    aigent()
+        .args(["score", dir.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Score:"));
+}
+
+#[test]
+fn score_json_format() {
+    let (_parent, dir) = make_skill_dir(
+        "processing-pdfs",
+        "---\nname: processing-pdfs\ndescription: >-\n  Processes PDF files and generates detailed reports.\n  Use when working with documents.\n---\nBody.\n",
+    );
+    let output = aigent()
+        .args(["score", dir.to_str().unwrap(), "--format", "json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["total"], 100);
+    assert_eq!(json["max"], 100);
+}
+
+#[test]
+fn score_missing_skill_exits_nonzero() {
+    let parent = tempdir().unwrap();
+    aigent()
+        .args(["score", parent.path().to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Score:"));
+}
+
+// ── M12: --structure flag ──────────────────────────────────────────
+
+#[test]
+fn validate_structure_flag_accepted() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: A test skill\n---\nBody.\n",
+    );
+    aigent()
+        .args(["validate", dir.to_str().unwrap(), "--structure"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn validate_structure_detects_missing_reference() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: A test skill\n---\n\nSee [guide](guide.md) for details.\n",
+    );
+    aigent()
+        .args(["validate", dir.to_str().unwrap(), "--structure"])
+        .assert()
+        .success() // structure checks are warnings, not errors
+        .stderr(predicate::str::contains("warning:").and(predicate::str::contains("guide.md")));
+}
+
+#[test]
+fn validate_structure_clean_skill_no_warnings() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: A test skill\n---\n\nSee [guide](guide.md) for details.\n",
+    );
+    fs::write(dir.join("guide.md"), "# Guide").unwrap();
+    aigent()
+        .args(["validate", dir.to_str().unwrap(), "--structure"])
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+}
+
+// ── M12: doc subcommand ──────────────────────────────────────────
+
+#[test]
+fn doc_generates_markdown_catalog() {
+    let (_parent, dir) = make_skill_dir(
+        "my-doc-skill",
+        "---\nname: my-doc-skill\ndescription: A documented skill\n---\nBody.\n",
+    );
+    aigent()
+        .args(["doc", dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Skill Catalog"))
+        .stdout(predicate::str::contains("## my-doc-skill"))
+        .stdout(predicate::str::contains("A documented skill"));
+}
+
+#[test]
+fn doc_no_args_exits_nonzero() {
+    aigent().arg("doc").assert().failure();
+}
+
+#[test]
+fn doc_output_writes_file() {
+    let (_parent, dir) = make_skill_dir(
+        "doc-out-skill",
+        "---\nname: doc-out-skill\ndescription: Outputs to file\n---\nBody.\n",
+    );
+    let outdir = tempdir().unwrap();
+    let outfile = outdir.path().join("catalog.md");
+    aigent()
+        .args([
+            "doc",
+            dir.to_str().unwrap(),
+            "--output",
+            outfile.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Updated"));
+    let content = fs::read_to_string(&outfile).unwrap();
+    assert!(content.contains("# Skill Catalog"));
+    assert!(content.contains("doc-out-skill"));
+}
+
+#[test]
+fn doc_output_unchanged_on_rerun() {
+    let (_parent, dir) = make_skill_dir(
+        "doc-stable",
+        "---\nname: doc-stable\ndescription: Stable\n---\nBody.\n",
+    );
+    let outdir = tempdir().unwrap();
+    let outfile = outdir.path().join("catalog.md");
+    // First run: creates file.
+    aigent()
+        .args([
+            "doc",
+            dir.to_str().unwrap(),
+            "--output",
+            outfile.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Updated"));
+    // Second run: content unchanged → "Unchanged".
+    aigent()
+        .args([
+            "doc",
+            dir.to_str().unwrap(),
+            "--output",
+            outfile.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Unchanged"));
+}
+
+#[test]
+fn doc_recursive_discovers_nested_skills() {
+    let parent = tempdir().unwrap();
+    let nested = parent.path().join("skills").join("nested-skill");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(
+        nested.join("SKILL.md"),
+        "---\nname: nested-skill\ndescription: Found recursively\n---\nBody.\n",
+    )
+    .unwrap();
+    aigent()
+        .args([
+            "doc",
+            parent.path().join("skills").to_str().unwrap(),
+            "--recursive",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("nested-skill"));
+}
+
+// ── M12: test subcommand ─────────────────────────────────────────
+
+#[test]
+fn test_skill_shows_activation_status() {
+    let (_parent, dir) = make_skill_dir(
+        "test-skill-activate",
+        "---\nname: test-skill-activate\ndescription: Processes PDF files and extracts text\n---\nBody.\n",
+    );
+    aigent()
+        .args(["test", dir.to_str().unwrap(), "process PDF files"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Activation:"))
+        .stdout(predicate::str::contains("STRONG"));
+}
+
+#[test]
+fn test_skill_no_match_query() {
+    let (_parent, dir) = make_skill_dir(
+        "test-no-match",
+        "---\nname: test-no-match\ndescription: Manages database connections\n---\nBody.\n",
+    );
+    aigent()
+        .args(["test", dir.to_str().unwrap(), "deploy kubernetes cluster"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("NONE"));
+}
+
+#[test]
+fn test_skill_json_format() {
+    let (_parent, dir) = make_skill_dir(
+        "test-json",
+        "---\nname: test-json\ndescription: Processes PDF files\n---\nBody.\n",
+    );
+    let output = aigent()
+        .args([
+            "test",
+            dir.to_str().unwrap(),
+            "process PDF",
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["name"], "test-json");
+    assert!(json["estimated_tokens"].as_u64().unwrap() > 0);
+}
+
+#[test]
+fn test_skill_missing_dir_exits_nonzero() {
+    aigent()
+        .args(["test", "/nonexistent/skill", "some query"])
+        .assert()
+        .failure();
+}
+
+// ── M12: upgrade subcommand ──────────────────────────────────────
+
+#[test]
+fn upgrade_detects_missing_compatibility() {
+    let (_parent, dir) = make_skill_dir(
+        "upgrade-test",
+        "---\nname: upgrade-test\ndescription: A basic skill\n---\nBody.\n",
+    );
+    aigent()
+        .args(["upgrade", dir.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("compatibility"));
+}
+
+#[test]
+fn upgrade_detects_missing_trigger_phrase() {
+    let (_parent, dir) = make_skill_dir(
+        "upgrade-trigger",
+        "---\nname: upgrade-trigger\ndescription: Does something\n---\nBody.\n",
+    );
+    aigent()
+        .args(["upgrade", dir.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("trigger phrase"));
+}
+
+#[test]
+fn upgrade_clean_skill_no_suggestions() {
+    let (_parent, dir) = make_skill_dir(
+        "upgrade-clean",
+        "---\nname: upgrade-clean\ndescription: >-\n  Manages user sessions. Use when handling authentication.\ncompatibility: claude-code\nmetadata:\n  version: '1.0.0'\n  author: test\n---\nBody.\n",
+    );
+    aigent()
+        .args(["upgrade", dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("No upgrade suggestions"));
+}
+
+#[test]
+fn upgrade_apply_modifies_skill() {
+    let (_parent, dir) = make_skill_dir(
+        "upgrade-apply",
+        "---\nname: upgrade-apply\ndescription: A basic skill\n---\nBody.\n",
+    );
+    aigent()
+        .args(["upgrade", dir.to_str().unwrap(), "--apply"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Applied"));
+    // Verify the file was updated.
+    let content = fs::read_to_string(dir.join("SKILL.md")).unwrap();
+    assert!(content.contains("compatibility"));
+}
+
+// ── M12: watch mode (no-feature build) ───────────────────────────
+
+#[test]
+fn watch_flag_without_feature_exits_with_message() {
+    let (_parent, dir) = make_skill_dir(
+        "watch-test",
+        "---\nname: watch-test\ndescription: Testing watch\n---\nBody.\n",
+    );
+    aigent()
+        .args(["validate", dir.to_str().unwrap(), "--watch"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("watch"));
 }
 
 // ── M11: build --interactive flag ─────────────────────────────────

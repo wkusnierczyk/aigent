@@ -70,7 +70,19 @@ aigent init my-skill/
 aigent build "Process PDF files and extract text" --no-llm
 
 # Validate a skill directory
-aigent validate my-skill/
+aigent validate my-skill/ --lint --structure
+
+# Score a skill against best practices (0–100)
+aigent score my-skill/
+
+# Test skill activation against a query
+aigent test my-skill/ "process PDF files"
+
+# Check for upgrade opportunities
+aigent upgrade my-skill/
+
+# Generate a skill catalog
+aigent doc skills/ --recursive
 
 # Read skill properties as JSON
 aigent read-properties my-skill/
@@ -227,20 +239,61 @@ aigent implements **all** rules from the specification, plus additional checks
 (Unicode NFKC normalization, path canonicalization, post-build validation) that
 go beyond both the specification and the reference implementation.
 
+### Extras
+
+Features in aigent that go beyond the specification and reference implementation:
+
+| Feature | Description |
+|---------|-------------|
+| Semantic linting | Quality checks: third-person descriptions, trigger phrases, gerund names, generic names |
+| Quality scoring | Weighted 0–100 score combining structural validation and semantic lint |
+| Auto-fix | Automatic correction of fixable issues (e.g., name casing) |
+| Skill builder | Generate skills from natural language (deterministic + multi-provider LLM) |
+| Interactive build | Step-by-step confirmation mode for skill generation |
+| Skill tester | Simulate skill activation against sample user queries |
+| Skill upgrade | Detect and apply best-practice upgrades (compatibility, metadata, trigger phrases) |
+| Directory structure validation | Check for missing references, script permissions, nesting depth |
+| Cross-skill conflict detection | Name collisions, description similarity, token budget analysis |
+| Documentation generation | Markdown skill catalog with diff-aware output |
+| Watch mode | Continuous validation on filesystem changes (optional `notify` feature) |
+| Multi-format prompt output | XML, JSON, YAML, Markdown prompt generation |
+| Multi-format validation output | Text and JSON diagnostic output |
+| Token budget estimation | Per-skill and total token usage reporting |
+| Claude Code plugin | Hybrid skills that work with or without the CLI installed |
+
 ## CLI Reference
 
-Run `aigent --help` for built-in documentation. Full API documentation is
-available at [docs.rs/aigent](https://docs.rs/aigent).
+Run `aigent --help` for a list of commands, or `aigent <command> --help` for
+details on a specific command (flags, arguments, examples). Full API
+documentation is available at [docs.rs/aigent](https://docs.rs/aigent).
 
 ### Commands
 
 <table>
 <tr><th width="280">Command</th><th>Description</th></tr>
-<tr><td><code>validate &lt;directory&gt;</code></td><td>Validate a skill directory; exit 0 if valid</td></tr>
+<tr><td><code>validate &lt;dirs...&gt;</code></td><td>Validate skill directories; exit 0 if valid</td></tr>
+<tr><td><code>lint &lt;directory&gt;</code></td><td>Run semantic lint checks on a skill</td></tr>
+<tr><td><code>score &lt;directory&gt;</code></td><td>Score a skill against best-practices checklist (0–100)</td></tr>
+<tr><td><code>test &lt;directory&gt; &lt;query&gt;</code></td><td>Test skill activation against a sample user query</td></tr>
+<tr><td><code>upgrade &lt;directory&gt;</code></td><td>Check a skill for upgrade opportunities</td></tr>
+<tr><td><code>doc &lt;dirs...&gt;</code></td><td>Generate a markdown skill catalog</td></tr>
 <tr><td><code>read-properties &lt;directory&gt;</code></td><td>Output skill properties as JSON</td></tr>
-<tr><td><code>to-prompt &lt;directories...&gt;</code></td><td>Generate <code>&lt;available_skills&gt;</code> XML block</td></tr>
+<tr><td><code>to-prompt &lt;dirs...&gt;</code></td><td>Generate <code>&lt;available_skills&gt;</code> XML block</td></tr>
 <tr><td><code>build &lt;purpose&gt;</code></td><td>Build a skill from natural language</td></tr>
 <tr><td><code>init [directory]</code></td><td>Create a template SKILL.md</td></tr>
+</table>
+
+### Validate Flags
+
+<table>
+<tr><th width="280">Flag</th><th>Description</th></tr>
+<tr><td><code>--lint</code></td><td>Run semantic lint checks</td></tr>
+<tr><td><code>--structure</code></td><td>Run directory structure checks</td></tr>
+<tr><td><code>--recursive</code></td><td>Discover skills recursively</td></tr>
+<tr><td><code>--apply-fixes</code></td><td>Apply automatic fixes for fixable issues</td></tr>
+<tr><td><code>--watch</code></td><td>Watch for changes and re-validate (see <a href="#watch-mode">Watch mode</a>)</td></tr>
+<tr><td><code>--target &lt;TARGET&gt;</code></td><td>Validation target: <code>standard</code> or <code>claude-code</code></td></tr>
+<tr><td><code>--format &lt;FORMAT&gt;</code></td><td>Output format: <code>text</code> or <code>json</code></td></tr>
 </table>
 
 ### Build Flags
@@ -250,7 +303,348 @@ available at [docs.rs/aigent](https://docs.rs/aigent).
 <tr><td><code>--name &lt;NAME&gt;</code></td><td>Override the derived skill name</td></tr>
 <tr><td><code>--dir &lt;DIRECTORY&gt;</code></td><td>Output directory</td></tr>
 <tr><td><code>--no-llm</code></td><td>Force deterministic mode (no LLM)</td></tr>
+<tr><td><code>--interactive</code></td><td>Step-by-step confirmation mode</td></tr>
 </table>
+
+### Command Examples
+
+#### `validate` — Check skill directories for errors
+
+Validates one or more skill directories against the Anthropic specification.
+Exit code 0 means valid; non-zero means errors or warnings were found.
+
+```
+$ aigent validate my-skill/
+(no output — skill is valid)
+```
+
+With `--lint` and `--structure` for additional checks:
+
+```
+$ aigent validate skills/aigent-validator --lint --structure
+warning: unexpected metadata field: 'argument-hint'
+info: name does not use gerund form
+```
+
+Multiple directories trigger cross-skill conflict detection automatically:
+
+```
+$ aigent validate skills/aigent-validator skills/aigent-builder skills/aigent-scorer
+skills/aigent-validator:
+  warning: unexpected metadata field: 'argument-hint'
+skills/aigent-builder:
+  warning: unexpected metadata field: 'argument-hint'
+  warning: unexpected metadata field: 'context'
+skills/aigent-scorer:
+  warning: unexpected metadata field: 'argument-hint'
+
+3 skills: 0 ok, 0 errors, 3 warnings only
+```
+
+JSON output for CI integration:
+
+```
+$ aigent validate skills/aigent-validator --format json
+[
+  {
+    "diagnostics": [
+      {
+        "code": "W001",
+        "field": "metadata",
+        "message": "unexpected metadata field: 'argument-hint'",
+        "severity": "warning"
+      }
+    ],
+    "path": "skills/aigent-validator"
+  }
+]
+```
+
+#### `lint` — Semantic quality checks
+
+Runs quality-focused checks beyond structural validation: third-person
+descriptions, trigger phrases, gerund name forms, generic names, and
+description detail.
+
+```
+$ aigent lint skills/aigent-validator
+info: name does not use gerund form
+```
+
+#### `score` — Rate a skill 0–100
+
+Rates a skill from 0 to 100 against the Anthropic best-practices checklist.
+The score has two weighted categories:
+
+- **Structural (60 points)** — Checks that the SKILL.md parses correctly, the
+  name matches the directory, required fields are present, no unknown fields
+  exist, and the body is within size limits. All six checks must pass to earn
+  the 60 points; any failure zeros the structural score.
+
+- **Quality (40 points)** — Five semantic lint checks worth 8 points each:
+  third-person description, trigger phrase (`"Use when..."`), gerund name form
+  (`converting-pdfs` not `pdf-converter`), specific (non-generic) name, and
+  description length (≥ 20 words).
+
+The exit code is 0 for a perfect score and 1 otherwise, making it suitable for
+CI gating.
+
+**Example** — a skill that passes all checks:
+
+```
+$ aigent score converting-pdfs/
+Score: 100/100
+
+Structural (60/60):
+  [PASS] SKILL.md exists and is parseable
+  [PASS] Name format valid
+  [PASS] Description valid
+  [PASS] Required fields present
+  [PASS] No unknown fields
+  [PASS] Body within size limits
+
+Quality (40/40):
+  [PASS] Third-person description
+  [PASS] Trigger phrase present
+  [PASS] Gerund name form
+  [PASS] Specific name
+  [PASS] Detailed description
+```
+
+**Example** — a skill with issues (unknown field zeroes structural, non-gerund
+name costs 8 quality points):
+
+```
+$ aigent score aigent-validator/
+Score: 32/100
+
+Structural (0/60):
+  [PASS] SKILL.md exists and is parseable
+  [PASS] Name format valid
+  [PASS] Description valid
+  [PASS] Required fields present
+  [FAIL] No unknown fields
+         unexpected metadata field: 'argument-hint'
+  [PASS] Body within size limits
+
+Quality (32/40):
+  [PASS] Third-person description
+  [PASS] Trigger phrase present
+  [FAIL] Gerund name form
+         name does not use gerund form
+  [PASS] Specific name
+  [PASS] Detailed description
+```
+
+#### `test` — Simulate skill activation
+
+Tests whether a skill's description would activate for a given user query.
+This is a dry-run of skill discovery — "if a user said *this*, would Claude
+pick up *that* skill?"
+
+Tokenizes the query and description, measures word overlap, and reports:
+- **Strong** (≥50% overlap) — skill would reliably activate
+- **Weak** (≥20%) — might activate, but description could be improved
+- **None** (<20%) — skill would not activate for this query
+
+Also reports estimated token cost and any validation issues.
+
+```
+$ aigent test skills/aigent-validator "validate a skill"
+Skill: aigent-validator
+Query: "validate a skill"
+Description: Validates AI agent skill definitions (SKILL.md files) against
+the Anthropic agent skill specification. ...
+
+Activation: STRONG ✓ — description aligns well with query
+Token footprint: ~76 tokens
+
+Validation warnings (1):
+  warning: unexpected metadata field: 'argument-hint'
+```
+
+```
+$ aigent test skills/aigent-validator "deploy kubernetes"
+...
+Activation: NONE ✗ — description does not match the test query
+Token footprint: ~76 tokens
+```
+
+#### `upgrade` — Detect and apply best-practice improvements
+
+Checks for recommended-but-optional fields and patterns. Use `--apply` to
+write missing fields into the SKILL.md.
+
+```
+$ aigent upgrade skills/aigent-validator
+Missing 'compatibility' field — recommended for multi-platform skills.
+Missing 'metadata.version' — recommended for tracking skill versions.
+Missing 'metadata.author' — recommended for attribution.
+
+Run with --apply to apply 3 suggestion(s).
+```
+
+```
+$ aigent upgrade --apply skills/aigent-validator
+(applies missing fields in-place, prints confirmation to stderr)
+```
+
+#### `doc` — Generate a skill catalog
+
+Produces a markdown catalog of skills. Use `--recursive` to discover skills
+in subdirectories, and `--output` to write to a file (diff-aware — only
+writes if content changed).
+
+```
+$ aigent doc skills --recursive
+# Skill Catalog
+
+## aigent-builder
+> Generates AI agent skill definitions (SKILL.md files) from natural
+> language descriptions. ...
+**Location**: `skills/aigent-builder/SKILL.md`
+
+---
+
+## aigent-scorer
+> Scores AI agent skill definitions (SKILL.md files) against the Anthropic
+> best-practices checklist. ...
+**Location**: `skills/aigent-scorer/SKILL.md`
+
+---
+
+## aigent-validator
+> Validates AI agent skill definitions (SKILL.md files) against the
+> Anthropic agent skill specification. ...
+**Location**: `skills/aigent-validator/SKILL.md`
+
+---
+```
+
+```
+$ aigent doc skills --recursive --output catalog.md
+(writes catalog.md; re-running skips write if content unchanged)
+```
+
+#### `read-properties` — Output skill metadata as JSON
+
+Parses the SKILL.md frontmatter and outputs structured JSON. Useful for
+scripting and integration with other tools.
+
+```
+$ aigent read-properties skills/aigent-validator
+{
+  "name": "aigent-validator",
+  "description": "Validates AI agent skill definitions ...",
+  "allowed-tools": "Bash(aigent validate *), Bash(command -v *), Read, Glob",
+  "metadata": {
+    "argument-hint": "[skill-directory-or-file]"
+  }
+}
+```
+
+#### `to-prompt` — Generate XML prompt block
+
+Generates the `<available_skills>` XML block that gets injected into Claude's
+system prompt. Accepts multiple skill directories.
+
+```
+$ aigent to-prompt skills/aigent-validator
+<available_skills>
+  <skill>
+    <name>aigent-validator</name>
+    <description>Validates AI agent skill definitions ...</description>
+    <location>skills/aigent-validator/SKILL.md</location>
+  </skill>
+</available_skills>
+```
+
+#### `build` — Generate a skill from natural language
+
+Creates a complete skill directory with SKILL.md from a purpose description.
+Uses LLM when an API key is available, or `--no-llm` for deterministic mode.
+
+```
+$ aigent build "Extract text from PDF files" --no-llm
+Created skill 'extracting-text-pdf-files' at extracting-text-pdf-files
+```
+
+The generated SKILL.md includes derived name, description, and a starter body:
+
+```markdown
+---
+name: extracting-text-pdf-files
+description: Extract text from PDF files. Use when working with files.
+---
+# Extracting Text Pdf Files
+
+## Quick start
+Extract text from PDF files
+
+## Usage
+Use this skill to Extract text from PDF files.
+```
+
+#### `init` — Create a template SKILL.md
+
+Scaffolds a skill directory with a template SKILL.md ready for editing.
+
+```
+$ aigent init my-skill
+Created my-skill/SKILL.md
+```
+
+```
+$ cat my-skill/SKILL.md
+---
+name: my-skill
+description: Describe what this skill does and when to use it
+---
+
+# My Skill
+
+## Quick start
+[Add quick start instructions here]
+
+## Usage
+[Add detailed usage instructions here]
+```
+
+### Watch mode
+
+The `--watch` flag on `validate` monitors skill directories for filesystem
+changes and re-validates automatically on each edit — a live feedback loop
+while developing skills.
+
+Watch mode is behind a **Cargo feature gate** because it pulls in
+platform-specific filesystem notification libraries (`notify`, `fsevent-sys`
+on macOS, `inotify` on Linux). Without the feature, the binary is smaller
+and has fewer dependencies.
+
+**Building with watch mode:**
+
+```bash
+# Build with watch support
+cargo build --release --features watch
+
+# Run with watch support (--features must be passed every time)
+cargo run --release --features watch -- validate --watch skills/
+
+# Or install with watch support
+cargo install aigent --features watch
+```
+
+> **Note:** Cargo feature flags are per-invocation — they are not remembered
+> between builds. You must pass `--features watch` on every `cargo build` or
+> `cargo run` invocation. Building debug with `--features watch` does not
+> enable it for release builds, and vice versa.
+
+Without the `watch` feature, using `--watch` prints a helpful error:
+
+```
+$ aigent validate --watch my-skill/
+Watch mode requires the 'watch' feature. Rebuild with: cargo build --features watch
+```
 
 ### Global Flags
 
@@ -274,6 +668,10 @@ Full Rust API documentation with examples is published at
 | `SkillSpec` | `builder` | Input specification for skill generation (purpose, optional overrides) |
 | `BuildResult` | `builder` | Build output (properties, files written, output directory) |
 | `ClarityAssessment` | `builder` | Purpose clarity evaluation result (clear flag, follow-up questions) |
+| `Diagnostic` | `diagnostics` | Structured diagnostic with severity, code, message, field, suggestion |
+| `ScoreResult` | `scorer` | Quality score result with structural and semantic categories |
+| `TestResult` | `tester` | Skill activation test result (query match, diagnostics, token cost) |
+| `SkillEntry` | `prompt` | Collected skill entry for prompt generation (name, description, location) |
 | `AigentError` | `errors` | Error enum: `Parse`, `Validation`, `Build`, `Io`, `Yaml` |
 | `Result<T>` | `errors` | Convenience alias for `std::result::Result<T, AigentError>` |
 
@@ -281,16 +679,23 @@ Full Rust API documentation with examples is published at
 
 | Function | Module | Description |
 |----------|--------|-------------|
-| `validate(&Path) -> Vec<String>` | `validator` | Validate skill directory, return errors and warnings |
-| `validate_metadata(&HashMap, Option<&Path>) -> Vec<String>` | `validator` | Validate metadata hash, return errors and warnings |
+| `validate(&Path) -> Vec<Diagnostic>` | `validator` | Validate skill directory |
+| `validate_with_target(&Path, ValidationTarget)` | `validator` | Validate with target profile |
 | `read_properties(&Path) -> Result<SkillProperties>` | `parser` | Parse directory into `SkillProperties` |
 | `find_skill_md(&Path) -> Option<PathBuf>` | `parser` | Find `SKILL.md` in directory (prefers uppercase) |
 | `parse_frontmatter(&str) -> Result<(HashMap, String)>` | `parser` | Split YAML frontmatter and body |
 | `to_prompt(&[&Path]) -> String` | `prompt` | Generate `<available_skills>` XML system prompt |
+| `to_prompt_format(&[&Path], PromptFormat) -> String` | `prompt` | Generate prompt in specified format |
+| `lint(&SkillProperties, &str) -> Vec<Diagnostic>` | `linter` | Run semantic quality checks |
+| `score(&Path) -> ScoreResult` | `scorer` | Score skill against best-practices checklist |
+| `test_skill(&Path, &str) -> Result<TestResult>` | `tester` | Test skill activation against a query |
+| `validate_structure(&Path) -> Vec<Diagnostic>` | `structure` | Validate directory structure |
+| `detect_conflicts(&[SkillEntry]) -> Vec<Diagnostic>` | `conflict` | Detect cross-skill conflicts |
+| `apply_fixes(&Path, &[Diagnostic]) -> Result<usize>` | `fixer` | Apply automatic fixes |
 | `build_skill(&SkillSpec) -> Result<BuildResult>` | `builder` | Full build pipeline with post-build validation |
 | `derive_name(&str) -> String` | `builder` | Derive kebab-case name from purpose (deterministic) |
 | `assess_clarity(&str) -> ClarityAssessment` | `builder` | Evaluate if purpose is clear enough for generation |
-| `init_skill(&Path) -> Result<PathBuf>` | `builder` | Initialize skill directory with template SKILL.md |
+| `init_skill(&Path, SkillTemplate) -> Result<PathBuf>` | `builder` | Initialize skill directory with template SKILL.md |
 
 ### Traits
 
@@ -302,8 +707,8 @@ Full Rust API documentation with examples is published at
 
 This repository is a
 [Claude Code plugin](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/extensions#custom-slash-commands).
-It provides two skills that Claude can use to build and validate SKILL.md files
-interactively.
+It provides three skills that Claude can use to build, validate, and score
+SKILL.md files interactively.
 
 ### Skills
 
@@ -311,8 +716,9 @@ interactively.
 |-------|-------------|
 | `aigent-builder` | Generates skill definitions from natural language. Triggered by "create a skill", "build a skill", etc. |
 | `aigent-validator` | Validates skills against the Anthropic specification. Triggered by "validate a skill", "check a skill", etc. |
+| `aigent-scorer` | Scores skills against best-practices checklist. Triggered by "score a skill", "rate a skill", etc. |
 
-Both skills operate in **hybrid mode**: they use the `aigent` CLI when it is
+All skills operate in **hybrid mode**: they use the `aigent` CLI when it is
 installed, and fall back to Claude-based generation/validation when it is not.
 This means the plugin works out of the box — no installation required — but
 produces higher-quality results with `aigent` available.
@@ -368,7 +774,14 @@ src/
 ├── models.rs                       # SkillProperties (serde)
 ├── parser.rs                       # SKILL.md frontmatter parser (serde_yaml_ng)
 ├── validator.rs                    # Metadata and directory validator
-├── prompt.rs                       # XML prompt generation
+├── linter.rs                       # Semantic lint checks
+├── fixer.rs                        # Auto-fix for fixable diagnostics
+├── diagnostics.rs                  # Structured diagnostics with error codes
+├── prompt.rs                       # Multi-format prompt generation
+├── scorer.rs                       # Quality scoring (0–100)
+├── structure.rs                    # Directory structure validation
+├── conflict.rs                     # Cross-skill conflict detection
+├── tester.rs                       # Skill activation tester/previewer
 ├── main.rs                         # CLI entry point (clap)
 └── builder/
     ├── mod.rs                      # Build pipeline orchestration

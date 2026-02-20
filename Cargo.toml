@@ -26,6 +26,10 @@ serde_yaml_ng = "0.10"
 thiserror = "2"
 unicode-normalization = "0.1"
 ureq = { version = "3", features = ["json"] }
+notify = { version = "8", optional = true }
+
+[features]
+watch = ["notify"]
 
 [dev-dependencies]
 assert_cmd = "2"

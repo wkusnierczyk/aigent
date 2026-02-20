@@ -161,6 +161,26 @@ pub const W001: &str = "W001";
 /// Body exceeds 500 lines.
 pub const W002: &str = "W002";
 
+// Structure validation codes (S001–S004)
+
+/// Referenced file does not exist.
+pub const S001: &str = "S001";
+/// Script missing execute permission (Unix only).
+pub const S002: &str = "S002";
+/// Reference depth exceeds 1 level.
+pub const S003: &str = "S003";
+/// Excessive directory nesting depth.
+pub const S004: &str = "S004";
+
+// Conflict detection codes (C001–C003)
+
+/// Name collision across skill directories.
+pub const C001: &str = "C001";
+/// Description overlap between skills.
+pub const C002: &str = "C002";
+/// Total token budget exceeded.
+pub const C003: &str = "C003";
+
 /// Validation target profile for controlling which fields are considered known.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ValidationTarget {
@@ -282,7 +302,7 @@ mod tests {
     fn error_codes_are_unique() {
         let codes = [
             E000, E001, E002, E003, E004, E005, E006, E007, E008, E009, E010, E011, E012, E013,
-            E014, E015, E016, E017, E018, W001, W002,
+            E014, E015, E016, E017, E018, W001, W002, S001, S002, S003, S004, C001, C002, C003,
         ];
         let mut seen = std::collections::HashSet::new();
         for code in &codes {

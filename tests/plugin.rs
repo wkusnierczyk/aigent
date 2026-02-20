@@ -211,6 +211,46 @@ fn builder_skill_has_context_fork() {
     );
 }
 
+// ── M12: Scorer skill ────────────────────────────────────────────
+
+#[test]
+fn validate_scorer_skill() {
+    aigent()
+        .args([
+            "validate",
+            "skills/aigent-scorer/",
+            "--target",
+            "claude-code",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn scorer_skill_name_matches_directory() {
+    let props = aigent::read_properties(Path::new("skills/aigent-scorer")).unwrap();
+    assert_eq!(props.name, "aigent-scorer");
+}
+
+#[test]
+fn scorer_skill_has_allowed_tools() {
+    let props = aigent::read_properties(Path::new("skills/aigent-scorer")).unwrap();
+    assert!(
+        props.allowed_tools.is_some(),
+        "scorer skill should have allowed-tools"
+    );
+}
+
+#[test]
+fn scorer_skill_has_trigger_phrase() {
+    let props = aigent::read_properties(Path::new("skills/aigent-scorer")).unwrap();
+    let desc_lower = props.description.to_lowercase();
+    assert!(
+        desc_lower.contains("use when"),
+        "scorer skill description should contain trigger phrase"
+    );
+}
+
 #[test]
 fn builder_skill_valid_with_claude_code_target() {
     aigent()
