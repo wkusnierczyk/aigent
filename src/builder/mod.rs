@@ -284,6 +284,22 @@ pub fn init_skill(dir: &Path, tmpl: SkillTemplate) -> Result<PathBuf> {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(&full_path, content)?;
+
+        // On Unix, set execute bit on shell scripts.
+        #[cfg(unix)]
+        {
+            if full_path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("sh"))
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let metadata = std::fs::metadata(&full_path)?;
+                let mut perms = metadata.permissions();
+                perms.set_mode(perms.mode() | 0o111);
+                std::fs::set_permissions(&full_path, perms)?;
+            }
+        }
     }
 
     Ok(dir.join("SKILL.md"))
@@ -294,6 +310,10 @@ pub fn init_skill(dir: &Path, tmpl: SkillTemplate) -> Result<PathBuf> {
 /// Uses the provided `reader` for input (stdin in production, `Cursor` in
 /// tests). Writes progress to stderr. Returns the same `BuildResult` as
 /// [`build_skill`] on success.
+///
+/// **Note**: Interactive mode always uses deterministic (template-based)
+/// generation regardless of the `no_llm` setting on the spec. This ensures
+/// the user sees exactly what will be written before confirming.
 ///
 /// The flow is:
 /// 1. Assess clarity — if unclear, print questions and return error
@@ -465,6 +485,23 @@ mod tests {
         init_skill(&dir, SkillTemplate::Minimal).unwrap();
         assert!(dir.exists());
         assert!(dir.join("SKILL.md").exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn init_code_skill_script_is_executable() {
+        use std::os::unix::fs::PermissionsExt;
+        let parent = tempdir().unwrap();
+        let dir = parent.path().join("code-skill");
+        init_skill(&dir, SkillTemplate::CodeSkill).unwrap();
+        let script = dir.join("scripts/run.sh");
+        assert!(script.exists(), "scripts/run.sh should exist");
+        let perms = std::fs::metadata(&script).unwrap().permissions();
+        assert!(
+            perms.mode() & 0o111 != 0,
+            "scripts/run.sh should be executable, mode: {:o}",
+            perms.mode()
+        );
     }
 
     // ── build_skill tests (30-38) ─────────────────────────────────────

@@ -111,7 +111,16 @@ jobs:
       - name: Generate checksums
         run: |
           cd artifacts
-          sha256sum *.tar.gz *.zip 2>/dev/null > checksums.txt || true
+          files=$(ls *.tar.gz *.zip 2>/dev/null || true)
+          if [ -z "$files" ]; then
+            echo "ERROR: No artifact archives found to generate checksums." >&2
+            exit 1
+          fi
+          sha256sum $files > checksums.txt
+          if [ ! -s checksums.txt ]; then
+            echo "ERROR: Failed to generate checksums or checksums.txt is empty." >&2
+            exit 1
+          fi
           cat checksums.txt
 
       - name: Extract changelog

@@ -43,7 +43,7 @@ CHECKSUM_URL="https://github.com/${REPO}/releases/download/${VERSION}/checksums.
 echo "Installing aigent ${VERSION} for ${TARGET}..."
 mkdir -p "$INSTALL_DIR"
 
-TMPDIR=$(mktemp -d)
+TMPDIR=$(mktemp -d 2>/dev/null || mktemp -d -t aigent)
 trap 'rm -rf "$TMPDIR"' EXIT
 
 # Download archive and checksums
@@ -54,15 +54,16 @@ fi
 
 if curl -fsSL -o "${TMPDIR}/checksums.txt" "$CHECKSUM_URL" 2>/dev/null; then
   # Verify checksum
-  EXPECTED=$(grep "${ASSET}" "${TMPDIR}/checksums.txt" | awk '{print $1}')
+  EXPECTED=$(awk -v asset="${ASSET}" '$2 == asset {print $1}' "${TMPDIR}/checksums.txt")
   if [ -n "$EXPECTED" ]; then
     if command -v sha256sum > /dev/null 2>&1; then
       ACTUAL=$(sha256sum "${TMPDIR}/${ASSET}" | awk '{print $1}')
     elif command -v shasum > /dev/null 2>&1; then
       ACTUAL=$(shasum -a 256 "${TMPDIR}/${ASSET}" | awk '{print $1}')
     else
-      echo "Warning: no sha256sum or shasum available, skipping checksum verification" >&2
-      ACTUAL="$EXPECTED"
+      echo "Error: neither sha256sum nor shasum is available, cannot verify checksum." >&2
+      echo "Please install sha256sum or shasum and re-run this installer." >&2
+      exit 1
     fi
     if [ "$ACTUAL" != "$EXPECTED" ]; then
       echo "Error: checksum verification failed" >&2

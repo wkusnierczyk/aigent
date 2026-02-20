@@ -125,14 +125,15 @@ pub fn to_prompt_format(dirs: &[&Path], format: PromptFormat) -> String {
 ///
 /// Uses the `chars / 4` heuristic, which is a standard approximation for
 /// English text. This may underestimate by 30–50% for technical content
-/// containing YAML frontmatter, XML tags, or code blocks.
+/// containing YAML frontmatter, XML tags, or code blocks. Uses character
+/// count (not byte length) to handle non-ASCII content correctly.
 #[must_use]
 pub fn estimate_tokens(s: &str) -> usize {
     // Minimum 1 token for non-empty strings.
     if s.is_empty() {
         0
     } else {
-        (s.len() / 4).max(1)
+        (s.chars().count() / 4).max(1)
     }
 }
 

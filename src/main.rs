@@ -140,9 +140,6 @@ enum Commands {
         /// Force deterministic mode (no LLM)
         #[arg(long)]
         no_llm: bool,
-        /// Template variant for skill structure
-        #[arg(long, value_enum, default_value_t = SkillTemplate::Minimal)]
-        template: SkillTemplate,
         /// Interactive mode with step-by-step confirmation
         #[arg(long, short = 'i')]
         interactive: bool,
@@ -325,7 +322,7 @@ fn main() {
             let content = aigent::prompt::to_prompt_format(&dirs, prompt_format);
 
             if let Some(output_path) = output {
-                // Diff-aware file output: compare with existing, report changes.
+                // Diff-aware file output: compare with existing, only write on change.
                 let changed = if output_path.exists() {
                     let existing = std::fs::read_to_string(&output_path).unwrap_or_default();
                     existing != content
@@ -333,15 +330,23 @@ fn main() {
                     true
                 };
 
-                std::fs::write(&output_path, &content).unwrap_or_else(|e| {
-                    eprintln!(
-                        "aigent to-prompt: failed to write {}: {e}",
-                        output_path.display()
-                    );
-                    std::process::exit(1);
-                });
-
                 if changed {
+                    if let Some(parent) = output_path.parent() {
+                        std::fs::create_dir_all(parent).unwrap_or_else(|e| {
+                            eprintln!(
+                                "aigent to-prompt: failed to create directory {}: {e}",
+                                parent.display()
+                            );
+                            std::process::exit(1);
+                        });
+                    }
+                    std::fs::write(&output_path, &content).unwrap_or_else(|e| {
+                        eprintln!(
+                            "aigent to-prompt: failed to write {}: {e}",
+                            output_path.display()
+                        );
+                        std::process::exit(1);
+                    });
                     eprintln!("Updated {}", output_path.display());
                     if budget {
                         let entries = aigent::prompt::collect_skills(&dirs);
@@ -364,7 +369,6 @@ fn main() {
             name,
             dir,
             no_llm,
-            template,
             interactive,
         }) => {
             let spec = aigent::SkillSpec {
@@ -372,7 +376,6 @@ fn main() {
                 name,
                 output_dir: dir,
                 no_llm,
-                template,
                 ..Default::default()
             };
             let result = if interactive {
