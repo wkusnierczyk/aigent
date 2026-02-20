@@ -1,7 +1,7 @@
-/// LLM provider implementations.
-///
-/// Each module provides a struct implementing `LlmProvider` with a
-/// `from_env()` constructor that reads API keys from environment variables.
+//! LLM provider implementations.
+//!
+//! Each module provides a struct implementing `LlmProvider` with a
+//! `from_env()` constructor that reads API keys from environment variables.
 
 /// Anthropic Claude API provider.
 pub mod anthropic;
