@@ -136,13 +136,22 @@ fn require_string(
     metadata: &HashMap<String, Value>,
     key: &str,
 ) -> std::result::Result<String, AigentError> {
+    use crate::diagnostics::{Diagnostic, Severity};
     match metadata.get(key) {
         Some(Value::String(s)) => Ok(s.clone()),
         Some(_) => Err(AigentError::Validation {
-            errors: vec![format!("`{key}` must be a string")],
+            errors: vec![Diagnostic::new(
+                Severity::Error,
+                "E000",
+                format!("`{key}` must be a string"),
+            )],
         }),
         None => Err(AigentError::Validation {
-            errors: vec![format!("missing required field `{key}`")],
+            errors: vec![Diagnostic::new(
+                Severity::Error,
+                "E000",
+                format!("missing required field `{key}`"),
+            )],
         }),
     }
 }
@@ -154,10 +163,15 @@ fn optional_string(
     metadata: &HashMap<String, Value>,
     key: &str,
 ) -> std::result::Result<Option<String>, AigentError> {
+    use crate::diagnostics::{Diagnostic, Severity};
     match metadata.get(key) {
         Some(Value::String(s)) => Ok(Some(s.clone())),
         Some(_) => Err(AigentError::Validation {
-            errors: vec![format!("`{key}` must be a string")],
+            errors: vec![Diagnostic::new(
+                Severity::Error,
+                "E000",
+                format!("`{key}` must be a string"),
+            )],
         }),
         None => Ok(None),
     }

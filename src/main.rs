@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+
+use aigent::diagnostics::{Diagnostic, ValidationTarget};
 
 #[derive(Parser)]
 #[command(
@@ -17,12 +19,67 @@ struct Cli {
     about: bool,
 }
 
+/// Output format for validation results.
+#[derive(Debug, Clone, Copy, ValueEnum, Default)]
+enum Format {
+    /// Human-readable text output (default)
+    #[default]
+    Text,
+    /// JSON array of diagnostic objects
+    Json,
+}
+
+/// Validation target profile for controlling known-field detection.
+#[derive(Debug, Clone, Copy, ValueEnum, Default)]
+enum Target {
+    /// Anthropic specification fields only (default)
+    #[default]
+    Standard,
+    /// Specification fields plus Claude Code extension fields
+    ClaudeCode,
+    /// No unknown-field warnings (all fields accepted)
+    Permissive,
+}
+
+impl From<Target> for ValidationTarget {
+    fn from(t: Target) -> Self {
+        match t {
+            Target::Standard => ValidationTarget::Standard,
+            Target::ClaudeCode => ValidationTarget::ClaudeCode,
+            Target::Permissive => ValidationTarget::Permissive,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Commands {
-    /// Validate a skill directory
+    /// Validate skill directories
     Validate {
+        /// Paths to skill directories or SKILL.md files
+        skill_dirs: Vec<PathBuf>,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+        /// Validation target profile
+        #[arg(long, value_enum, default_value_t = Target::Standard)]
+        target: Target,
+        /// Run semantic lint checks
+        #[arg(long)]
+        lint: bool,
+        /// Discover skills recursively
+        #[arg(long)]
+        recursive: bool,
+        /// Apply automatic fixes for fixable issues
+        #[arg(long)]
+        apply_fixes: bool,
+    },
+    /// Run semantic lint checks on a skill directory
+    Lint {
         /// Path to skill directory or SKILL.md file
         skill_dir: PathBuf,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
     },
     /// Read skill properties as JSON
     ReadProperties {
@@ -65,16 +122,142 @@ fn main() {
     }
 
     match cli.command {
-        Some(Commands::Validate { skill_dir }) => {
-            let dir = resolve_skill_dir(&skill_dir);
-            let messages = aigent::validate(&dir);
-            let has_errors = messages.iter().any(|m| !m.starts_with("warning: "));
-            for m in &messages {
-                eprintln!("{m}");
+        Some(Commands::Validate {
+            skill_dirs,
+            format,
+            target,
+            lint,
+            recursive,
+            apply_fixes,
+        }) => {
+            // Resolve directories: expand --recursive, resolve file paths.
+            let dirs = resolve_dirs(&skill_dirs, recursive);
+            if dirs.is_empty() {
+                eprintln!("Usage: aigent validate <skill-dir> [<skill-dir>...]");
+                std::process::exit(1);
             }
+
+            let mut all_diags: Vec<(PathBuf, Vec<Diagnostic>)> = Vec::new();
+            let target_val: ValidationTarget = target.into();
+
+            for dir in &dirs {
+                let mut diags = aigent::validate_with_target(dir, target_val);
+
+                // Apply fixes if requested.
+                if apply_fixes {
+                    match aigent::apply_fixes(dir, &diags) {
+                        Ok(count) if count > 0 => {
+                            eprintln!("Applied {count} fix(es) to {}", dir.display());
+                            // Re-validate after fixes.
+                            diags = aigent::validate_with_target(dir, target_val);
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            eprintln!("warning: could not apply fixes to {}: {e}", dir.display());
+                        }
+                    }
+                }
+
+                // Append lint results if requested.
+                if lint {
+                    if let Ok(props) = aigent::read_properties(dir) {
+                        let body = read_body(dir);
+                        diags.extend(aigent::lint(&props, &body));
+                    }
+                }
+
+                all_diags.push((dir.clone(), diags));
+            }
+
+            let has_errors = all_diags
+                .iter()
+                .any(|(_, d)| d.iter().any(|d| d.is_error()));
+
+            match format {
+                Format::Text => {
+                    let multi = all_diags.len() > 1;
+                    for (dir, diags) in &all_diags {
+                        if multi && !diags.is_empty() {
+                            eprintln!("{}:", dir.display());
+                        }
+                        for d in diags {
+                            if multi {
+                                eprintln!("  {d}");
+                            } else {
+                                eprintln!("{d}");
+                            }
+                        }
+                    }
+                    // Print summary for multi-dir.
+                    if multi {
+                        let total = all_diags.len();
+                        let errors = all_diags
+                            .iter()
+                            .filter(|(_, d)| d.iter().any(|d| d.is_error()))
+                            .count();
+                        let warnings = all_diags
+                            .iter()
+                            .filter(|(_, d)| {
+                                d.iter().any(|d| d.is_warning()) && !d.iter().any(|d| d.is_error())
+                            })
+                            .count();
+                        let ok = total - errors - warnings;
+                        eprintln!(
+                            "\n{total} skills: {ok} ok, {errors} errors, {warnings} warnings"
+                        );
+                    }
+                }
+                Format::Json => {
+                    // For single dir: flat array. For multi: array of objects.
+                    if all_diags.len() == 1 {
+                        let json = serde_json::to_string_pretty(&all_diags[0].1).unwrap();
+                        println!("{json}");
+                    } else {
+                        let entries: Vec<serde_json::Value> = all_diags
+                            .iter()
+                            .map(|(dir, diags)| {
+                                serde_json::json!({
+                                    "path": dir.display().to_string(),
+                                    "diagnostics": diags,
+                                })
+                            })
+                            .collect();
+                        let json = serde_json::to_string_pretty(&entries).unwrap();
+                        println!("{json}");
+                    }
+                }
+            }
+
             if has_errors {
                 std::process::exit(1);
             }
+        }
+        Some(Commands::Lint { skill_dir, format }) => {
+            let dir = resolve_skill_dir(&skill_dir);
+            let diags = match aigent::read_properties(&dir) {
+                Ok(props) => {
+                    let body = read_body(&dir);
+                    aigent::lint(&props, &body)
+                }
+                Err(e) => {
+                    eprintln!("aigent lint: {e}");
+                    std::process::exit(1);
+                }
+            };
+
+            match format {
+                Format::Text => {
+                    for d in &diags {
+                        eprintln!("{d}");
+                    }
+                }
+                Format::Json => {
+                    let json = serde_json::to_string_pretty(&diags).unwrap();
+                    println!("{json}");
+                }
+            }
+
+            // Lint never causes failure — all diagnostics are Info.
         }
         Some(Commands::ReadProperties { skill_dir }) => {
             let dir = resolve_skill_dir(&skill_dir);
@@ -161,5 +344,41 @@ fn resolve_skill_dir(path: &std::path::Path) -> PathBuf {
             .unwrap_or_else(|| PathBuf::from("."))
     } else {
         path.to_path_buf()
+    }
+}
+
+/// Resolve a list of input paths into skill directories.
+///
+/// When `recursive` is true, discovers skills under each path recursively.
+/// When false, treats each path as a direct skill directory (resolving
+/// SKILL.md file paths to their parent).
+fn resolve_dirs(paths: &[PathBuf], recursive: bool) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    for path in paths {
+        if recursive {
+            dirs.extend(aigent::discover_skills(path));
+        } else {
+            dirs.push(resolve_skill_dir(path));
+        }
+    }
+    dirs
+}
+
+/// Read the SKILL.md body (post-frontmatter) for linting.
+///
+/// Returns an empty string if the file can't be read or parsed.
+fn read_body(dir: &std::path::Path) -> String {
+    let path = aigent::find_skill_md(dir);
+    let path = match path {
+        Some(p) => p,
+        None => return String::new(),
+    };
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return String::new(),
+    };
+    match aigent::parse_frontmatter(&content) {
+        Ok((_, body)) => body,
+        Err(_) => String::new(),
     }
 }
