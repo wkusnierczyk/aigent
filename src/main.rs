@@ -92,13 +92,44 @@ fn main() {
             let dirs: Vec<&std::path::Path> = skill_dirs.iter().map(|p| p.as_path()).collect();
             println!("{}", aigent::to_prompt(&dirs));
         }
-        Some(Commands::Build { .. }) => {
-            eprintln!("aigent build: not yet implemented");
-            std::process::exit(1);
+        Some(Commands::Build {
+            purpose,
+            name,
+            dir,
+            no_llm,
+        }) => {
+            let spec = aigent::SkillSpec {
+                purpose,
+                name,
+                output_dir: dir,
+                no_llm,
+                ..Default::default()
+            };
+            match aigent::build_skill(&spec) {
+                Ok(result) => {
+                    println!(
+                        "Created skill '{}' at {}",
+                        result.properties.name,
+                        result.output_dir.display()
+                    );
+                }
+                Err(e) => {
+                    eprintln!("aigent build: {e}");
+                    std::process::exit(1);
+                }
+            }
         }
-        Some(Commands::Init { .. }) => {
-            eprintln!("aigent init: not yet implemented");
-            std::process::exit(1);
+        Some(Commands::Init { dir }) => {
+            let target = dir.unwrap_or_else(|| PathBuf::from("."));
+            match aigent::init_skill(&target) {
+                Ok(path) => {
+                    println!("Created {}", path.display());
+                }
+                Err(e) => {
+                    eprintln!("aigent init: {e}");
+                    std::process::exit(1);
+                }
+            }
         }
         None => {
             eprintln!("Usage: aigent <command> [args]");
