@@ -1,14 +1,16 @@
-[
-  {
-    "type": "PostToolUse",
-    "matcher": {
-      "tool_name": "^(Write|Edit)$"
-    },
-    "hooks": [
+{
+  "description": "Auto-validate SKILL.md files after Write/Edit operations",
+  "hooks": {
+    "PostToolUse": [
       {
-        "type": "command",
-        "command": "command -v jq >/dev/null 2>&1 || exit 0; file=\"$(echo '$TOOL_INPUT' | jq -r '.file_path // empty')\" && [ -n \"$file\" ] && echo \"$file\" | grep -q 'SKILL\\.md$' && command -v aigent >/dev/null 2>&1 && aigent validate \"$(dirname \"$file\")\" 2>&1 || true"
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v jq >/dev/null 2>&1 || exit 0; file=\"$(jq -r '.tool_input.file_path // empty')\" && [ -n \"$file\" ] && echo \"$file\" | grep -q 'SKILL\\.md$' && command -v aigent >/dev/null 2>&1 && aigent validate \"$(dirname \"$file\")\" 2>&1 || true"
+          }
+        ]
       }
     ]
   }
-]
+}
