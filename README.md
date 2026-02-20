@@ -754,6 +754,12 @@ cd aigent
 cargo build
 ```
 
+### Optional tooling
+
+```bash
+cargo install cargo-edit            # Adds `cargo set-version` for release versioning
+```
+
 ### Common tasks
 
 ```bash
