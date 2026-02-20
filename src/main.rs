@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
+use aigent::builder::template::SkillTemplate;
 use aigent::diagnostics::{Diagnostic, ValidationTarget};
 
 #[derive(Parser)]
@@ -51,6 +52,31 @@ impl From<Target> for ValidationTarget {
     }
 }
 
+/// Output format for prompt generation.
+#[derive(Debug, Clone, Copy, ValueEnum, Default)]
+enum PromptOutputFormat {
+    /// XML format (default, matches Anthropic spec)
+    #[default]
+    Xml,
+    /// JSON array
+    Json,
+    /// YAML document
+    Yaml,
+    /// Markdown document
+    Markdown,
+}
+
+impl From<PromptOutputFormat> for aigent::prompt::PromptFormat {
+    fn from(f: PromptOutputFormat) -> Self {
+        match f {
+            PromptOutputFormat::Xml => aigent::prompt::PromptFormat::Xml,
+            PromptOutputFormat::Json => aigent::prompt::PromptFormat::Json,
+            PromptOutputFormat::Yaml => aigent::prompt::PromptFormat::Yaml,
+            PromptOutputFormat::Markdown => aigent::prompt::PromptFormat::Markdown,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Validate skill directories
@@ -87,10 +113,19 @@ enum Commands {
         #[arg(name = "skill-dir")]
         skill_dir: PathBuf,
     },
-    /// Generate XML prompt from skill directories
+    /// Generate prompt from skill directories
     ToPrompt {
         /// Paths to skill directories
         skill_dirs: Vec<PathBuf>,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = PromptOutputFormat::Xml)]
+        format: PromptOutputFormat,
+        /// Show estimated token budget
+        #[arg(long)]
+        budget: bool,
+        /// Write output to file instead of stdout (exit 0 = unchanged, 1 = changed)
+        #[arg(long)]
+        output: Option<PathBuf>,
     },
     /// Build a skill from a natural language description
     Build {
@@ -105,11 +140,17 @@ enum Commands {
         /// Force deterministic mode (no LLM)
         #[arg(long)]
         no_llm: bool,
+        /// Interactive mode with step-by-step confirmation
+        #[arg(long, short = 'i')]
+        interactive: bool,
     },
     /// Initialize a skill directory with a template SKILL.md
     Init {
         /// Target directory
         dir: Option<PathBuf>,
+        /// Template variant for skill structure
+        #[arg(long, value_enum, default_value_t = SkillTemplate::Minimal)]
+        template: SkillTemplate,
     },
 }
 
@@ -270,15 +311,65 @@ fn main() {
                 }
             }
         }
-        Some(Commands::ToPrompt { skill_dirs }) => {
+        Some(Commands::ToPrompt {
+            skill_dirs,
+            format,
+            budget,
+            output,
+        }) => {
             let dirs: Vec<&std::path::Path> = skill_dirs.iter().map(|p| p.as_path()).collect();
-            println!("{}", aigent::to_prompt(&dirs));
+            let prompt_format: aigent::prompt::PromptFormat = format.into();
+            let content = aigent::prompt::to_prompt_format(&dirs, prompt_format);
+
+            if let Some(output_path) = output {
+                // Diff-aware file output: compare with existing, only write on change.
+                let changed = if output_path.exists() {
+                    let existing = std::fs::read_to_string(&output_path).unwrap_or_default();
+                    existing != content
+                } else {
+                    true
+                };
+
+                if changed {
+                    if let Some(parent) = output_path.parent() {
+                        std::fs::create_dir_all(parent).unwrap_or_else(|e| {
+                            eprintln!(
+                                "aigent to-prompt: failed to create directory {}: {e}",
+                                parent.display()
+                            );
+                            std::process::exit(1);
+                        });
+                    }
+                    std::fs::write(&output_path, &content).unwrap_or_else(|e| {
+                        eprintln!(
+                            "aigent to-prompt: failed to write {}: {e}",
+                            output_path.display()
+                        );
+                        std::process::exit(1);
+                    });
+                    eprintln!("Updated {}", output_path.display());
+                    if budget {
+                        let entries = aigent::prompt::collect_skills(&dirs);
+                        eprint!("{}", aigent::prompt::format_budget(&entries));
+                    }
+                    std::process::exit(1);
+                } else {
+                    eprintln!("Unchanged {}", output_path.display());
+                }
+            } else {
+                println!("{content}");
+                if budget {
+                    let entries = aigent::prompt::collect_skills(&dirs);
+                    eprint!("{}", aigent::prompt::format_budget(&entries));
+                }
+            }
         }
         Some(Commands::Build {
             purpose,
             name,
             dir,
             no_llm,
+            interactive,
         }) => {
             let spec = aigent::SkillSpec {
                 purpose,
@@ -287,7 +378,13 @@ fn main() {
                 no_llm,
                 ..Default::default()
             };
-            match aigent::build_skill(&spec) {
+            let result = if interactive {
+                let mut stdin = std::io::stdin().lock();
+                aigent::interactive_build(&spec, &mut stdin)
+            } else {
+                aigent::build_skill(&spec)
+            };
+            match result {
                 Ok(result) => {
                     println!(
                         "Created skill '{}' at {}",
@@ -301,9 +398,9 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Init { dir }) => {
+        Some(Commands::Init { dir, template }) => {
             let target = dir.unwrap_or_else(|| PathBuf::from("."));
-            match aigent::init_skill(&target) {
+            match aigent::init_skill(&target, template) {
                 Ok(path) => {
                     println!("Created {}", path.display());
                 }

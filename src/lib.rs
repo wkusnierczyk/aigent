@@ -35,7 +35,7 @@ pub mod linter;
 pub mod models;
 /// SKILL.md frontmatter parser.
 pub mod parser;
-/// XML prompt generation for LLM injection.
+/// Multi-format prompt generation for LLM injection.
 pub mod prompt;
 /// Skill directory and metadata validator.
 pub mod validator;
@@ -50,7 +50,10 @@ pub use linter::lint;
 #[doc(inline)]
 pub use models::SkillProperties;
 pub use parser::{find_skill_md, parse_frontmatter, read_properties, CLAUDE_CODE_KEYS, KNOWN_KEYS};
-pub use prompt::to_prompt;
+pub use prompt::{
+    collect_skills, estimate_tokens, format_budget, to_prompt, to_prompt_format, PromptFormat,
+    SkillEntry,
+};
 pub use validator::{
     discover_skills, known_keys_for, validate, validate_metadata, validate_metadata_with_target,
     validate_with_target,
@@ -58,6 +61,6 @@ pub use validator::{
 
 #[doc(inline)]
 pub use builder::{
-    assess_clarity, build_skill, derive_name, init_skill, BuildResult, ClarityAssessment,
-    LlmProvider, SkillSpec,
+    assess_clarity, build_skill, derive_name, init_skill, interactive_build, BuildResult,
+    ClarityAssessment, LlmProvider, SkillSpec, SkillTemplate,
 };

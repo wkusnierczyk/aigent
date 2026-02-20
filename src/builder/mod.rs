@@ -9,6 +9,7 @@ pub mod template;
 mod util;
 
 pub use llm::LlmProvider;
+pub use template::SkillTemplate;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -40,6 +41,8 @@ pub struct SkillSpec {
     pub output_dir: Option<PathBuf>,
     /// Force deterministic mode (no LLM) regardless of environment.
     pub no_llm: bool,
+    /// Template variant for generating the skill structure.
+    pub template: SkillTemplate,
 }
 
 /// Result of skill generation.
@@ -238,8 +241,9 @@ pub fn assess_clarity(purpose: &str) -> ClarityAssessment {
 /// Initialize a skill directory with a template SKILL.md.
 ///
 /// Creates the directory if it doesn't exist. Returns an error if a SKILL.md
-/// (or skill.md) already exists in the target directory.
-pub fn init_skill(dir: &Path) -> Result<PathBuf> {
+/// (or skill.md) already exists in the target directory. The `tmpl` parameter
+/// selects the template variant; use `SkillTemplate::Minimal` for the default.
+pub fn init_skill(dir: &Path, tmpl: SkillTemplate) -> Result<PathBuf> {
     // Check for existing SKILL.md.
     if dir.exists() {
         if let Some(existing) = find_skill_md(dir) {
@@ -267,17 +271,150 @@ pub fn init_skill(dir: &Path) -> Result<PathBuf> {
         })
         .unwrap_or_else(|| "my-skill".to_string());
 
-    // Generate template content.
-    let content = template::skill_template(&dir_name);
+    // Generate template files.
+    let files = template::template_files(tmpl, &dir_name);
 
     // Create directory if needed.
     std::fs::create_dir_all(dir)?;
 
-    // Write SKILL.md.
-    let path = dir.join("SKILL.md");
-    std::fs::write(&path, content)?;
+    // Write all template files.
+    for (rel_path, content) in &files {
+        let full_path = dir.join(rel_path);
+        if let Some(parent) = full_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&full_path, content)?;
 
-    Ok(path)
+        // On Unix, set execute bit on shell scripts.
+        #[cfg(unix)]
+        {
+            if full_path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("sh"))
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let metadata = std::fs::metadata(&full_path)?;
+                let mut perms = metadata.permissions();
+                perms.set_mode(perms.mode() | 0o111);
+                std::fs::set_permissions(&full_path, perms)?;
+            }
+        }
+    }
+
+    Ok(dir.join("SKILL.md"))
+}
+
+/// Run an interactive build session, prompting for confirmation at each step.
+///
+/// Uses the provided `reader` for input (stdin in production, `Cursor` in
+/// tests). Writes progress to stderr. Returns the same `BuildResult` as
+/// [`build_skill`] on success.
+///
+/// **Note**: Interactive mode always uses deterministic (template-based)
+/// generation regardless of the `no_llm` setting on the spec. This ensures
+/// the user sees exactly what will be written before confirming.
+///
+/// The flow is:
+/// 1. Assess clarity — if unclear, print questions and return error
+/// 2. Derive name — print and confirm
+/// 3. Generate description — print and confirm
+/// 4. Generate body preview — print first 20 lines
+/// 5. Confirm write
+/// 6. Build, validate, and report
+pub fn interactive_build(
+    spec: &SkillSpec,
+    reader: &mut dyn std::io::BufRead,
+) -> Result<BuildResult> {
+    // 1. Assess clarity.
+    let assessment = assess_clarity(&spec.purpose);
+    if !assessment.clear {
+        eprintln!("Purpose needs clarification:");
+        for q in &assessment.questions {
+            eprintln!("  - {q}");
+        }
+        return Err(AigentError::Build {
+            message: "purpose is not clear enough for generation".to_string(),
+        });
+    }
+
+    // 2. Derive name.
+    let name = spec
+        .name
+        .clone()
+        .unwrap_or_else(|| derive_name(&spec.purpose));
+    eprintln!("Name: {name}");
+    if !confirm("Continue?", reader)? {
+        return Err(AigentError::Build {
+            message: "cancelled by user".to_string(),
+        });
+    }
+
+    // 3. Generate description.
+    let description = deterministic::generate_description(&spec.purpose, &name);
+    eprintln!("Description: {description}");
+    if !confirm("Continue?", reader)? {
+        return Err(AigentError::Build {
+            message: "cancelled by user".to_string(),
+        });
+    }
+
+    // 4. Preview body.
+    let body = generate_body(&spec.purpose, &name, &description);
+    eprintln!("Body preview:");
+    for line in body.lines().take(20) {
+        eprintln!("  {line}");
+    }
+    let total_lines = body.lines().count();
+    if total_lines > 20 {
+        eprintln!("  ... ({} more lines)", total_lines - 20);
+    }
+
+    // 5. Confirm write.
+    if !confirm("Write skill?", reader)? {
+        return Err(AigentError::Build {
+            message: "cancelled by user".to_string(),
+        });
+    }
+
+    // 6. Build (reuse standard build with forced deterministic mode).
+    let build_spec = SkillSpec {
+        purpose: spec.purpose.clone(),
+        name: Some(name),
+        no_llm: true,
+        output_dir: spec.output_dir.clone(),
+        template: spec.template,
+        ..Default::default()
+    };
+    let result = build_skill(&build_spec)?;
+
+    // 7. Report.
+    let diags = validate(&result.output_dir);
+    let error_count = diags.iter().filter(|d| d.is_error()).count();
+    let warning_count = diags.iter().filter(|d| d.is_warning()).count();
+    if error_count == 0 && warning_count == 0 {
+        eprintln!("Validation: passed");
+    } else {
+        eprintln!("Validation: {error_count} error(s), {warning_count} warning(s)");
+        for d in &diags {
+            eprintln!("  {d}");
+        }
+    }
+
+    Ok(result)
+}
+
+/// Read a yes/no confirmation from `reader`. Returns `true` for "y" or "yes".
+fn confirm(prompt: &str, reader: &mut dyn std::io::BufRead) -> Result<bool> {
+    eprint!("{prompt} [y/N] ");
+    let mut line = String::new();
+    reader
+        .read_line(&mut line)
+        .map_err(|e| AigentError::Build {
+            message: format!("failed to read input: {e}"),
+        })?;
+    let answer = line.trim().to_lowercase();
+    Ok(answer == "y" || answer == "yes")
 }
 
 #[cfg(test)]
@@ -291,7 +428,7 @@ mod tests {
     fn init_creates_skill_md_in_empty_dir() {
         let parent = tempdir().unwrap();
         let dir = parent.path().join("my-skill");
-        let _ = init_skill(&dir).unwrap();
+        let _ = init_skill(&dir, SkillTemplate::Minimal).unwrap();
         assert!(dir.join("SKILL.md").exists());
     }
 
@@ -299,7 +436,7 @@ mod tests {
     fn init_returns_path_to_created_file() {
         let parent = tempdir().unwrap();
         let dir = parent.path().join("my-skill");
-        let path = init_skill(&dir).unwrap();
+        let path = init_skill(&dir, SkillTemplate::Minimal).unwrap();
         assert_eq!(path, dir.join("SKILL.md"));
     }
 
@@ -307,7 +444,7 @@ mod tests {
     fn init_created_file_has_valid_frontmatter() {
         let parent = tempdir().unwrap();
         let dir = parent.path().join("my-skill");
-        init_skill(&dir).unwrap();
+        init_skill(&dir, SkillTemplate::Minimal).unwrap();
         // The file should be parseable.
         let result = crate::read_properties(&dir);
         assert!(
@@ -320,7 +457,7 @@ mod tests {
     fn init_name_derived_from_directory() {
         let parent = tempdir().unwrap();
         let dir = parent.path().join("cool-tool");
-        init_skill(&dir).unwrap();
+        init_skill(&dir, SkillTemplate::Minimal).unwrap();
         let props = crate::read_properties(&dir).unwrap();
         assert_eq!(props.name, "cool-tool");
     }
@@ -331,7 +468,7 @@ mod tests {
         let dir = parent.path().join("my-skill");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("SKILL.md"), "---\nname: x\n---\n").unwrap();
-        let result = init_skill(&dir);
+        let result = init_skill(&dir, SkillTemplate::Minimal);
         assert!(result.is_err(), "should fail if SKILL.md already exists");
         let err = result.unwrap_err().to_string();
         assert!(
@@ -345,9 +482,26 @@ mod tests {
         let parent = tempdir().unwrap();
         let dir = parent.path().join("nonexistent-dir");
         assert!(!dir.exists());
-        init_skill(&dir).unwrap();
+        init_skill(&dir, SkillTemplate::Minimal).unwrap();
         assert!(dir.exists());
         assert!(dir.join("SKILL.md").exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn init_code_skill_script_is_executable() {
+        use std::os::unix::fs::PermissionsExt;
+        let parent = tempdir().unwrap();
+        let dir = parent.path().join("code-skill");
+        init_skill(&dir, SkillTemplate::CodeSkill).unwrap();
+        let script = dir.join("scripts/run.sh");
+        assert!(script.exists(), "scripts/run.sh should exist");
+        let perms = std::fs::metadata(&script).unwrap().permissions();
+        assert!(
+            perms.mode() & 0o111 != 0,
+            "scripts/run.sh should be executable, mode: {:o}",
+            perms.mode()
+        );
     }
 
     // ── build_skill tests (30-38) ─────────────────────────────────────
@@ -503,6 +657,7 @@ mod tests {
             output_dir: Some(dir),
             no_llm: true,
             extra_files: None,
+            template: SkillTemplate::Minimal,
         };
         let result = build_skill(&spec).unwrap();
         assert_eq!(result.properties.name, "full-skill");
@@ -515,5 +670,75 @@ mod tests {
             result.properties.allowed_tools.as_deref(),
             Some("Bash, Read")
         );
+    }
+
+    // ── interactive_build tests ──────────────────────────────────────
+
+    #[test]
+    fn interactive_build_with_yes_answers() {
+        let parent = tempdir().unwrap();
+        let dir = parent.path().join("processing-pdf-files");
+        let spec = SkillSpec {
+            purpose: "Process PDF files and extract text content".to_string(),
+            name: Some("processing-pdf-files".to_string()),
+            output_dir: Some(dir.clone()),
+            no_llm: true,
+            ..Default::default()
+        };
+        // Simulate "y" for all three prompts (name, description, write).
+        let mut input = std::io::Cursor::new(b"y\ny\ny\n".to_vec());
+        let result = interactive_build(&spec, &mut input).unwrap();
+        assert!(dir.join("SKILL.md").exists());
+        assert!(!result.properties.name.is_empty());
+    }
+
+    #[test]
+    fn interactive_build_cancel_at_name() {
+        let parent = tempdir().unwrap();
+        let dir = parent.path().join("interactive-cancel");
+        let spec = SkillSpec {
+            purpose: "Process PDF files and extract text content".to_string(),
+            output_dir: Some(dir.clone()),
+            no_llm: true,
+            ..Default::default()
+        };
+        // Simulate "n" at the name confirmation.
+        let mut input = std::io::Cursor::new(b"n\n".to_vec());
+        let result = interactive_build(&spec, &mut input);
+        assert!(result.is_err());
+        assert!(!dir.exists(), "no files should be created on cancel");
+    }
+
+    #[test]
+    fn interactive_build_unclear_purpose() {
+        let parent = tempdir().unwrap();
+        let dir = parent.path().join("unclear");
+        let spec = SkillSpec {
+            purpose: "do stuff".to_string(),
+            output_dir: Some(dir),
+            no_llm: true,
+            ..Default::default()
+        };
+        let mut input = std::io::Cursor::new(b"".to_vec());
+        let result = interactive_build(&spec, &mut input);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("not clear enough"));
+    }
+
+    #[test]
+    fn non_interactive_build_unchanged() {
+        // Verify that the standard build path is unaffected.
+        let parent = tempdir().unwrap();
+        let dir = parent.path().join("processing-pdf-files");
+        let spec = SkillSpec {
+            purpose: "Process PDF files".to_string(),
+            output_dir: Some(dir.clone()),
+            no_llm: true,
+            ..Default::default()
+        };
+        let result = build_skill(&spec).unwrap();
+        assert!(dir.join("SKILL.md").exists());
+        assert_eq!(result.properties.name, "processing-pdf-files");
     }
 }

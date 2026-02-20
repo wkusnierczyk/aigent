@@ -8,6 +8,7 @@ description: >-
   directories.
 allowed-tools: Bash(aigent *), Bash(command -v *), Write, Read, Glob
 argument-hint: "[skill-description]"
+context: fork
 ---
 
 # Skill Builder

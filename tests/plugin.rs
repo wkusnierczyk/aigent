@@ -132,3 +132,94 @@ fn install_script_has_posix_shebang() {
         "install.sh should start with #!/bin/sh"
     );
 }
+
+// ── M11: Install script checksum verification ──────────────────────
+
+#[test]
+fn install_script_has_checksum_verification() {
+    let content = fs::read_to_string("install.sh").unwrap();
+    assert!(
+        content.contains("sha256sum") || content.contains("shasum"),
+        "install.sh should reference sha256sum or shasum for checksum verification"
+    );
+}
+
+#[test]
+fn install_script_downloads_checksums_txt() {
+    let content = fs::read_to_string("install.sh").unwrap();
+    assert!(
+        content.contains("checksums.txt"),
+        "install.sh should download checksums.txt"
+    );
+}
+
+// ── M11: Release workflow checksum generation ──────────────────────
+
+#[test]
+fn release_workflow_generates_checksums() {
+    let content =
+        fs::read_to_string(".github/workflows/release.yml").expect("release.yml should exist");
+    assert!(
+        content.contains("sha256sum"),
+        "release.yml should generate SHA256 checksums"
+    );
+    assert!(
+        content.contains("checksums.txt"),
+        "release.yml should create checksums.txt"
+    );
+}
+
+// ── M11: Hooks ─────────────────────────────────────────────────────
+
+#[test]
+fn hooks_json_exists_and_valid() {
+    let content = fs::read_to_string("hooks/hooks.json").expect("hooks/hooks.json should exist");
+    let json: serde_json::Value =
+        serde_json::from_str(&content).expect("hooks.json should be valid JSON");
+    assert!(json.is_array(), "hooks.json should be an array");
+}
+
+#[test]
+fn hooks_json_has_post_tool_use() {
+    let content = fs::read_to_string("hooks/hooks.json").unwrap();
+    let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let arr = json.as_array().unwrap();
+    assert!(!arr.is_empty(), "hooks.json should have at least one hook");
+    assert_eq!(
+        arr[0]["type"], "PostToolUse",
+        "first hook should be PostToolUse"
+    );
+}
+
+#[test]
+fn hooks_json_targets_write_and_edit() {
+    let content = fs::read_to_string("hooks/hooks.json").unwrap();
+    assert!(
+        content.contains("Write") && content.contains("Edit"),
+        "hooks should target Write and Edit tools"
+    );
+}
+
+// ── M11: Builder skill context:fork ────────────────────────────────
+
+#[test]
+fn builder_skill_has_context_fork() {
+    let content = fs::read_to_string("skills/aigent-builder/SKILL.md").unwrap();
+    assert!(
+        content.contains("context: fork"),
+        "builder skill should have context: fork"
+    );
+}
+
+#[test]
+fn builder_skill_valid_with_claude_code_target() {
+    aigent()
+        .args([
+            "validate",
+            "skills/aigent-builder/",
+            "--target",
+            "claude-code",
+        ])
+        .assert()
+        .success();
+}
