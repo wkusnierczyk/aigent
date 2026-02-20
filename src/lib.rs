@@ -13,5 +13,5 @@ pub use prompt::to_prompt;
 pub use validator::{validate, validate_metadata};
 
 pub use builder::{
-    assess_clarity, build_skill, derive_name, BuildResult, ClarityAssessment, SkillSpec,
+    assess_clarity, build_skill, derive_name, init_skill, BuildResult, ClarityAssessment, SkillSpec,
 };

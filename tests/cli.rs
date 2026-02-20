@@ -234,22 +234,125 @@ fn to_prompt_mixed_valid_and_invalid() {
     assert!(stdout.contains("<name>good-skill</name>"));
 }
 
-// ── Unimplemented subcommands ───────────────────────────────────────
+// ── build ──────────────────────────────────────────────────────────
 
 #[test]
-fn build_not_yet_implemented() {
+fn build_deterministic_creates_dir() {
+    let parent = tempdir().unwrap();
+    let dir = parent.path().join("processing-pdf-files");
     aigent()
-        .args(["build", "a test purpose"])
+        .args([
+            "build",
+            "Process PDF files",
+            "--no-llm",
+            "--dir",
+            dir.to_str().unwrap(),
+        ])
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("not yet implemented"));
+        .success()
+        .stdout(predicate::str::contains("Created skill"));
+    assert!(dir.join("SKILL.md").exists());
 }
 
 #[test]
-fn init_not_yet_implemented() {
+fn build_with_name_override() {
+    let parent = tempdir().unwrap();
+    let dir = parent.path().join("my-pdf-tool");
     aigent()
-        .args(["init"])
+        .args([
+            "build",
+            "Process PDF files",
+            "--no-llm",
+            "--name",
+            "my-pdf-tool",
+            "--dir",
+            dir.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("my-pdf-tool"));
+}
+
+#[test]
+fn build_with_dir_override() {
+    let parent = tempdir().unwrap();
+    let dir = parent.path().join("custom-output");
+    // Use --name matching the dir name so validation passes.
+    aigent()
+        .args([
+            "build",
+            "Process PDF files",
+            "--no-llm",
+            "--name",
+            "custom-output",
+            "--dir",
+            dir.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("custom-output"));
+    assert!(dir.join("SKILL.md").exists());
+}
+
+// ── init ───────────────────────────────────────────────────────────
+
+#[test]
+fn init_in_empty_dir() {
+    let parent = tempdir().unwrap();
+    let dir = parent.path().join("new-skill");
+    aigent()
+        .args(["init", dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created"));
+    assert!(dir.join("SKILL.md").exists());
+}
+
+#[test]
+fn init_where_skill_md_exists() {
+    let (_parent, dir) = make_skill_dir(
+        "existing",
+        "---\nname: existing\ndescription: Test\n---\nBody.\n",
+    );
+    aigent()
+        .args(["init", dir.to_str().unwrap()])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("not yet implemented"));
+        .stderr(predicate::str::contains("already exists"));
+}
+
+#[test]
+fn init_with_dir_arg() {
+    let parent = tempdir().unwrap();
+    let dir = parent.path().join("specified-dir");
+    aigent()
+        .args(["init", dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created"));
+    assert!(dir.join("SKILL.md").exists());
+}
+
+#[test]
+fn built_skill_passes_validate() {
+    let parent = tempdir().unwrap();
+    let dir = parent.path().join("roundtrip-skill");
+    // Build the skill.
+    aigent()
+        .args([
+            "build",
+            "Process PDF files",
+            "--no-llm",
+            "--name",
+            "roundtrip-skill",
+            "--dir",
+            dir.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    // Validate the built skill.
+    aigent()
+        .args(["validate", dir.to_str().unwrap()])
+        .assert()
+        .success();
 }
