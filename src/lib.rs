@@ -12,7 +12,7 @@
 //!
 //! // Validate a skill directory
 //! let errors = aigent::validate(Path::new("my-skill"));
-//! assert!(errors.is_empty());
+//! // errors will contain diagnostics if the skill is invalid
 //!
 //! // Read skill properties
 //! let props = aigent::read_properties(Path::new("my-skill")).unwrap();
