@@ -1,3 +1,5 @@
+use super::util::to_title_case;
+
 /// Generate a SKILL.md template for `init`.
 ///
 /// The `dir_name` is used as the `name` field (kebab-cased) and the heading
@@ -43,24 +45,4 @@ fn to_kebab_case(s: &str) -> String {
     }
 
     result.trim_matches('-').to_string()
-}
-
-/// Convert a kebab-case name to title case.
-fn to_title_case(name: &str) -> String {
-    name.split('-')
-        .map(capitalize_first)
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// Capitalize the first character of a string.
-fn capitalize_first(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        None => String::new(),
-        Some(c) => {
-            let upper: String = c.to_uppercase().collect();
-            format!("{upper}{}", chars.as_str())
-        }
-    }
 }

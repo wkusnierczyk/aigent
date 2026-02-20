@@ -80,7 +80,7 @@ pub fn llm_generate_description(
     name: &str,
 ) -> Result<String> {
     let system = "You are a technical writer. Write a concise skill description \
-        in third person. Describe what the skill does and when to use it. Maximum 200 \
+        in third person. Describe what the skill does and when to use it. Maximum 1024 \
         characters. No quotes or formatting.";
     let user_msg = format!("Skill name: {name}\nPurpose: {purpose}");
 

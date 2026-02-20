@@ -2,6 +2,7 @@ pub mod deterministic;
 pub mod llm;
 pub mod providers;
 pub mod template;
+mod util;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
