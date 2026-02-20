@@ -5,11 +5,17 @@ use thiserror::Error;
 pub enum AigentError {
     /// SKILL.md parsing failed.
     #[error("parse error: {message}")]
-    Parse { message: String },
+    Parse {
+        /// Description of the parse failure.
+        message: String,
+    },
 
     /// Skill validation found problems.
     #[error("{}", format_validation_errors(errors))]
-    Validation { errors: Vec<String> },
+    Validation {
+        /// List of validation error messages.
+        errors: Vec<String>,
+    },
 
     /// Filesystem I/O error.
     #[error("IO error: {0}")]
@@ -21,7 +27,10 @@ pub enum AigentError {
 
     /// Skill build error.
     #[error("build error: {message}")]
-    Build { message: String },
+    Build {
+        /// Description of the build failure.
+        message: String,
+    },
 }
 
 /// Format validation errors for display.
