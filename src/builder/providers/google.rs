@@ -76,8 +76,8 @@ struct ResponseBody {
 impl LlmProvider for GoogleProvider {
     fn generate(&self, system: &str, user: &str) -> Result<String> {
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            self.model, self.api_key
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+            self.model
         );
 
         let body = RequestBody {
@@ -95,6 +95,7 @@ impl LlmProvider for GoogleProvider {
 
         let mut response = ureq::post(&url)
             .header("Content-Type", "application/json")
+            .header("x-goog-api-key", &self.api_key)
             .send_json(&body)
             .map_err(|e| AigentError::Build {
                 message: format!("Google API request failed: {e}"),

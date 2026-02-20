@@ -152,6 +152,17 @@ pub fn build_skill(spec: &SkillSpec) -> Result<BuildResult> {
 
     if let Some(ref extra) = spec.extra_files {
         for (rel_path, file_content) in extra {
+            // Reject absolute paths and path traversal components.
+            let path = std::path::Path::new(rel_path);
+            if path.is_absolute()
+                || path
+                    .components()
+                    .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
+                return Err(AigentError::Build {
+                    message: format!("extra file path must be relative without '..': {rel_path}"),
+                });
+            }
             let full_path = output_dir.join(rel_path);
             if let Some(parent) = full_path.parent() {
                 std::fs::create_dir_all(parent)?;
@@ -169,6 +180,15 @@ pub fn build_skill(spec: &SkillSpec) -> Result<BuildResult> {
         .map(|m| m.as_str())
         .collect();
     if !errors.is_empty() {
+        // Best-effort cleanup of files we just wrote, to avoid leaving
+        // invalid artifacts on disk that block subsequent runs.
+        let _ = std::fs::remove_file(&skill_md_path);
+        if let Some(ref extra) = spec.extra_files {
+            for rel_path in extra.keys() {
+                let full_path = output_dir.join(rel_path);
+                let _ = std::fs::remove_file(&full_path);
+            }
+        }
         return Err(AigentError::Build {
             message: format!("generated skill failed validation:\n{}", errors.join("\n")),
         });
@@ -215,13 +235,25 @@ pub fn init_skill(dir: &Path) -> Result<PathBuf> {
     }
 
     // Derive directory name for the template.
+    // Filter out "." and ".." which produce empty kebab-case names.
     let dir_name = dir
         .file_name()
         .and_then(|n| n.to_str())
-        .unwrap_or("my-skill");
+        .filter(|name| !name.is_empty() && *name != "." && *name != "..")
+        .map(|name| name.to_string())
+        .or_else(|| {
+            // Fall back to the current working directory's basename.
+            std::env::current_dir().ok().and_then(|cwd| {
+                cwd.file_name()
+                    .and_then(|n| n.to_str())
+                    .filter(|name| !name.is_empty() && *name != "." && *name != "..")
+                    .map(|name| name.to_string())
+            })
+        })
+        .unwrap_or_else(|| "my-skill".to_string());
 
     // Generate template content.
-    let content = template::skill_template(dir_name);
+    let content = template::skill_template(&dir_name);
 
     // Create directory if needed.
     std::fs::create_dir_all(dir)?;

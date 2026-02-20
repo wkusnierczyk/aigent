@@ -6,7 +6,12 @@ use super::util::to_title_case;
 /// (title-cased).
 #[must_use]
 pub fn skill_template(dir_name: &str) -> String {
-    let name = to_kebab_case(dir_name);
+    let raw_name = to_kebab_case(dir_name);
+    let name = if raw_name.is_empty() {
+        "my-skill".to_string()
+    } else {
+        raw_name
+    };
     let title = to_title_case(&name);
 
     format!(

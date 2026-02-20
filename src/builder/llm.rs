@@ -93,9 +93,9 @@ pub fn llm_generate_description(
         });
     }
 
-    // Truncate to 1024 chars (spec limit) if needed.
-    if desc.len() > 1024 {
-        Ok(desc[..1024].to_string())
+    // Truncate to 1024 characters (spec limit) if needed.
+    if desc.chars().count() > 1024 {
+        Ok(desc.chars().take(1024).collect())
     } else {
         Ok(desc)
     }

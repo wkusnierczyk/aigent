@@ -172,9 +172,9 @@ pub fn generate_description(purpose: &str, _name: &str) -> String {
     let trigger = derive_trigger(purpose);
     let description = format!("{sentence} Use when {trigger}.");
 
-    // Truncate to 1024 characters if needed.
-    if description.len() > 1024 {
-        description[..1024].to_string()
+    // Truncate to 1024 characters if needed (char-safe for multibyte UTF-8).
+    if description.chars().count() > 1024 {
+        description.chars().take(1024).collect()
     } else {
         description
     }
