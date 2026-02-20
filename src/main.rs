@@ -92,12 +92,18 @@ enum Commands {
         /// Run semantic lint checks
         #[arg(long)]
         lint: bool,
+        /// Run directory structure checks
+        #[arg(long)]
+        structure: bool,
         /// Discover skills recursively
         #[arg(long)]
         recursive: bool,
         /// Apply automatic fixes for fixable issues
         #[arg(long)]
         apply_fixes: bool,
+        /// Watch for changes and re-validate (requires 'watch' feature)
+        #[arg(long)]
+        watch: bool,
     },
     /// Run semantic lint checks on a skill directory
     Lint {
@@ -144,6 +150,50 @@ enum Commands {
         #[arg(long, short = 'i')]
         interactive: bool,
     },
+    /// Score a skill against best-practices checklist
+    Score {
+        /// Path to skill directory or SKILL.md file
+        #[arg(name = "skill-dir")]
+        skill_dir: PathBuf,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
+    /// Generate a markdown skill catalog
+    Doc {
+        /// Paths to skill directories
+        skill_dirs: Vec<PathBuf>,
+        /// Write output to file instead of stdout
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Discover skills recursively
+        #[arg(long)]
+        recursive: bool,
+    },
+    /// Test a skill against a sample user query
+    Test {
+        /// Path to skill directory or SKILL.md file
+        #[arg(name = "skill-dir")]
+        skill_dir: PathBuf,
+        /// Sample user query to test activation against
+        #[arg(name = "query")]
+        query: String,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
+    /// Check a skill for upgrade opportunities
+    Upgrade {
+        /// Path to skill directory or SKILL.md file
+        #[arg(name = "skill-dir")]
+        skill_dir: PathBuf,
+        /// Apply automatic upgrades
+        #[arg(long)]
+        apply: bool,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
     /// Initialize a skill directory with a template SKILL.md
     Init {
         /// Target directory
@@ -168,9 +218,31 @@ fn main() {
             format,
             target,
             lint,
+            structure,
             recursive,
             apply_fixes,
+            watch,
         }) => {
+            // Watch mode: re-run validation on filesystem changes.
+            #[cfg(feature = "watch")]
+            if watch {
+                run_watch_mode(
+                    &skill_dirs,
+                    format,
+                    target,
+                    lint,
+                    structure,
+                    recursive,
+                    apply_fixes,
+                );
+                return;
+            }
+            #[cfg(not(feature = "watch"))]
+            if watch {
+                eprintln!("Watch mode requires the 'watch' feature. Rebuild with: cargo build --features watch");
+                std::process::exit(1);
+            }
+
             // Resolve directories: expand --recursive, resolve file paths.
             let dirs = resolve_dirs(&skill_dirs, recursive);
             if dirs.is_empty() {
@@ -211,8 +283,23 @@ fn main() {
                     }
                 }
 
+                // Append structure checks if requested.
+                if structure {
+                    diags.extend(aigent::validate_structure(dir));
+                }
+
                 all_diags.push((dir.clone(), diags));
             }
+
+            // Run cross-skill conflict detection for multi-dir validation.
+            let conflict_diags = if all_diags.len() > 1 {
+                let skill_dirs_refs: Vec<&std::path::Path> =
+                    dirs.iter().map(|p| p.as_path()).collect();
+                let entries = aigent::collect_skills(&skill_dirs_refs);
+                aigent::detect_conflicts(&entries)
+            } else {
+                vec![]
+            };
 
             let has_errors = all_diags
                 .iter()
@@ -231,6 +318,13 @@ fn main() {
                             } else {
                                 eprintln!("{d}");
                             }
+                        }
+                    }
+                    // Print cross-skill conflict warnings.
+                    if !conflict_diags.is_empty() {
+                        eprintln!("\nCross-skill conflicts:");
+                        for d in &conflict_diags {
+                            eprintln!("  {d}");
                         }
                     }
                     // Print summary for multi-dir.
@@ -254,7 +348,7 @@ fn main() {
                 }
                 Format::Json => {
                     // Always emit consistent array-of-objects format.
-                    let entries: Vec<serde_json::Value> = all_diags
+                    let mut entries: Vec<serde_json::Value> = all_diags
                         .iter()
                         .map(|(dir, diags)| {
                             serde_json::json!({
@@ -263,6 +357,13 @@ fn main() {
                             })
                         })
                         .collect();
+                    // Append cross-skill conflict diagnostics.
+                    if !conflict_diags.is_empty() {
+                        entries.push(serde_json::json!({
+                            "path": "<cross-skill>",
+                            "diagnostics": conflict_diags,
+                        }));
+                    }
                     let json = serde_json::to_string_pretty(&entries).unwrap();
                     println!("{json}");
                 }
@@ -364,6 +465,25 @@ fn main() {
                 }
             }
         }
+        Some(Commands::Score { skill_dir, format }) => {
+            let dir = resolve_skill_dir(&skill_dir);
+            let result = aigent::score(&dir);
+
+            match format {
+                Format::Text => {
+                    eprint!("{}", aigent::scorer::format_text(&result));
+                }
+                Format::Json => {
+                    let json = serde_json::to_string_pretty(&result).unwrap();
+                    println!("{json}");
+                }
+            }
+
+            // Exit with non-zero if score is below 100 (not perfect).
+            if result.total < result.max {
+                std::process::exit(1);
+            }
+        }
         Some(Commands::Build {
             purpose,
             name,
@@ -398,6 +518,131 @@ fn main() {
                 }
             }
         }
+        Some(Commands::Doc {
+            skill_dirs,
+            output,
+            recursive,
+        }) => {
+            let dirs = resolve_dirs(&skill_dirs, recursive);
+            if dirs.is_empty() {
+                if recursive {
+                    eprintln!("No SKILL.md files found under the specified path(s).");
+                } else {
+                    eprintln!("Usage: aigent doc <skill-dir> [<skill-dir>...]");
+                }
+                std::process::exit(1);
+            }
+
+            let dir_refs: Vec<&std::path::Path> = dirs.iter().map(|p| p.as_path()).collect();
+            let entries = aigent::collect_skills(&dir_refs);
+            let content = format_doc_catalog(&entries);
+
+            if let Some(output_path) = output {
+                // Diff-aware output: only write on change.
+                let changed = if output_path.exists() {
+                    let existing = std::fs::read_to_string(&output_path).unwrap_or_default();
+                    existing != content
+                } else {
+                    true
+                };
+
+                if changed {
+                    if let Some(parent) = output_path.parent() {
+                        std::fs::create_dir_all(parent).unwrap_or_else(|e| {
+                            eprintln!(
+                                "aigent doc: failed to create directory {}: {e}",
+                                parent.display()
+                            );
+                            std::process::exit(1);
+                        });
+                    }
+                    std::fs::write(&output_path, &content).unwrap_or_else(|e| {
+                        eprintln!("aigent doc: failed to write {}: {e}", output_path.display());
+                        std::process::exit(1);
+                    });
+                    eprintln!("Updated {}", output_path.display());
+                } else {
+                    eprintln!("Unchanged {}", output_path.display());
+                }
+            } else {
+                println!("{content}");
+            }
+        }
+        Some(Commands::Test {
+            skill_dir,
+            query,
+            format,
+        }) => {
+            let dir = resolve_skill_dir(&skill_dir);
+            match aigent::test_skill(&dir, &query) {
+                Ok(result) => match format {
+                    Format::Text => {
+                        print!("{}", aigent::tester::format_test_result(&result));
+                    }
+                    Format::Json => {
+                        let json = serde_json::json!({
+                            "name": result.name,
+                            "query": result.query,
+                            "description": result.description,
+                            "activation": format!("{:?}", result.query_match),
+                            "estimated_tokens": result.estimated_tokens,
+                            "validation_errors": result.diagnostics.iter()
+                                .filter(|d| d.is_error()).count(),
+                            "validation_warnings": result.diagnostics.iter()
+                                .filter(|d| d.is_warning()).count(),
+                            "structure_issues": result.structure_diagnostics.len(),
+                        });
+                        println!("{}", serde_json::to_string_pretty(&json).unwrap());
+                    }
+                },
+                Err(e) => {
+                    eprintln!("aigent test: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some(Commands::Upgrade {
+            skill_dir,
+            apply,
+            format,
+        }) => {
+            let dir = resolve_skill_dir(&skill_dir);
+            match run_upgrade(&dir, apply) {
+                Ok(suggestions) => {
+                    if suggestions.is_empty() {
+                        eprintln!("No upgrade suggestions — skill follows current best practices.");
+                    } else {
+                        match format {
+                            Format::Text => {
+                                for s in &suggestions {
+                                    eprintln!("{s}");
+                                }
+                                if !apply {
+                                    eprintln!(
+                                        "\nRun with --apply to apply {} suggestion(s).",
+                                        suggestions.len()
+                                    );
+                                }
+                            }
+                            Format::Json => {
+                                let json = serde_json::json!({
+                                    "suggestions": suggestions,
+                                    "applied": apply,
+                                });
+                                println!("{}", serde_json::to_string_pretty(&json).unwrap());
+                            }
+                        }
+                        if !apply {
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("aigent upgrade: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
         Some(Commands::Init { dir, template }) => {
             let target = dir.unwrap_or_else(|| PathBuf::from("."));
             match aigent::init_skill(&target, template) {
@@ -423,11 +668,13 @@ fn print_about() {
         "aigent: Rust AI Agent Skills Tool\n\
          ├─ version:    {}\n\
          ├─ author:     {}\n\
+         ├─ developer:  mailto:waclaw.kusnierczyk@gmail.com\n\
          ├─ source:     {}\n\
-         └─ license:    {}",
+         └─ licence:    {} https://opensource.org/licenses/{}",
         env!("CARGO_PKG_VERSION"),
         env!("CARGO_PKG_AUTHORS"),
         env!("CARGO_PKG_REPOSITORY"),
+        env!("CARGO_PKG_LICENSE"),
         env!("CARGO_PKG_LICENSE"),
     );
 }
@@ -465,6 +712,187 @@ fn resolve_dirs(paths: &[PathBuf], recursive: bool) -> Vec<PathBuf> {
     dirs
 }
 
+/// Run watch mode: re-validate on filesystem changes (requires `watch` feature).
+#[cfg(feature = "watch")]
+fn run_watch_mode(
+    skill_dirs: &[PathBuf],
+    _format: Format,
+    target: Target,
+    lint: bool,
+    structure: bool,
+    recursive: bool,
+    apply_fixes: bool,
+) {
+    use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    let dirs = resolve_dirs(skill_dirs, recursive);
+    if dirs.is_empty() {
+        eprintln!("No SKILL.md files found.");
+        std::process::exit(1);
+    }
+
+    let target_val: aigent::diagnostics::ValidationTarget = target.into();
+
+    // Run initial validation.
+    run_validation_pass(&dirs, target_val, lint, structure, apply_fixes);
+
+    // Set up file watcher.
+    let (tx, rx) = mpsc::channel();
+    let mut watcher = RecommendedWatcher::new(tx, Config::default()).unwrap_or_else(|e| {
+        eprintln!("aigent watch: failed to create watcher: {e}");
+        std::process::exit(1);
+    });
+
+    // Watch all parent directories of skill dirs.
+    let mut watch_paths: Vec<PathBuf> = Vec::new();
+    for dir in &dirs {
+        let watch_dir = if recursive {
+            dir.parent().unwrap_or(dir).to_path_buf()
+        } else {
+            dir.clone()
+        };
+        if !watch_paths.contains(&watch_dir) {
+            watch_paths.push(watch_dir);
+        }
+    }
+    for path in &watch_paths {
+        if let Err(e) = watcher.watch(path, RecursiveMode::Recursive) {
+            eprintln!("aigent watch: failed to watch {}: {e}", path.display());
+        }
+    }
+
+    eprintln!("Watching for changes... (press Ctrl+C to stop)");
+
+    let debounce = Duration::from_millis(500);
+    let mut last_run = Instant::now();
+
+    loop {
+        match rx.recv() {
+            Ok(_event) => {
+                // Debounce: skip if we ran too recently.
+                if last_run.elapsed() < debounce {
+                    // Drain pending events.
+                    while rx.try_recv().is_ok() {}
+                    continue;
+                }
+
+                // Clear terminal.
+                eprint!("\x1b[2J\x1b[H");
+
+                // Re-resolve dirs in case new skills appeared.
+                let dirs = resolve_dirs(skill_dirs, recursive);
+                run_validation_pass(&dirs, target_val, lint, structure, apply_fixes);
+
+                last_run = Instant::now();
+
+                // Drain any queued events during validation.
+                while rx.try_recv().is_ok() {}
+            }
+            Err(e) => {
+                eprintln!("aigent watch: watcher error: {e}");
+                break;
+            }
+        }
+    }
+}
+
+/// Run a single validation pass (used by watch mode).
+#[cfg(feature = "watch")]
+fn run_validation_pass(
+    dirs: &[PathBuf],
+    target: aigent::diagnostics::ValidationTarget,
+    lint: bool,
+    structure: bool,
+    apply_fixes: bool,
+) {
+    let mut total_errors = 0;
+    let mut total_warnings = 0;
+
+    for dir in dirs {
+        let mut diags = aigent::validate_with_target(dir, target);
+
+        if apply_fixes {
+            if let Ok(count) = aigent::apply_fixes(dir, &diags) {
+                if count > 0 {
+                    eprintln!("Applied {count} fix(es) to {}", dir.display());
+                    diags = aigent::validate_with_target(dir, target);
+                }
+            }
+        }
+
+        if lint {
+            if let Ok(props) = aigent::read_properties(dir) {
+                let body = read_body(dir);
+                diags.extend(aigent::lint(&props, &body));
+            }
+        }
+
+        if structure {
+            diags.extend(aigent::validate_structure(dir));
+        }
+
+        let has_errors = diags.iter().any(|d| d.is_error());
+        let has_warnings = diags.iter().any(|d| d.is_warning());
+
+        if has_errors {
+            total_errors += 1;
+        } else if has_warnings {
+            total_warnings += 1;
+        }
+
+        if !diags.is_empty() {
+            if dirs.len() > 1 {
+                eprintln!("{}:", dir.display());
+            }
+            for d in &diags {
+                if dirs.len() > 1 {
+                    eprintln!("  {d}");
+                } else {
+                    eprintln!("{d}");
+                }
+            }
+        }
+    }
+
+    let total = dirs.len();
+    let ok = total - total_errors - total_warnings;
+    eprintln!("\n{total} skills: {ok} ok, {total_errors} errors, {total_warnings} warnings only");
+}
+
+/// Format a skill catalog as markdown documentation.
+///
+/// Generates a markdown document listing all skills sorted alphabetically,
+/// with name, description, and location. Missing fields are omitted.
+fn format_doc_catalog(entries: &[aigent::SkillEntry]) -> String {
+    let mut out = String::from("# Skill Catalog\n");
+
+    let mut sorted: Vec<_> = entries.iter().collect();
+    sorted.sort_by(|a, b| a.name.cmp(&b.name));
+
+    for entry in sorted {
+        out.push_str(&format!("\n## {}\n", entry.name));
+        out.push_str(&format!("> {}\n", entry.description));
+
+        // Read full properties for optional fields.
+        let loc_path = std::path::Path::new(&entry.location);
+        if let Ok(props) = aigent::read_properties(loc_path) {
+            if let Some(compat) = &props.compatibility {
+                out.push_str(&format!("\n**Compatibility**: {compat}\n"));
+            }
+            if let Some(license) = &props.license {
+                out.push_str(&format!("**License**: {license}\n"));
+            }
+        }
+
+        out.push_str(&format!("**Location**: `{}`\n", entry.location));
+        out.push_str("\n---\n");
+    }
+
+    out
+}
+
 /// Read the SKILL.md body (post-frontmatter) for linting.
 ///
 /// Returns an empty string if the file can't be read or parsed.
@@ -482,4 +910,124 @@ fn read_body(dir: &std::path::Path) -> String {
         Ok((_, body)) => body,
         Err(_) => String::new(),
     }
+}
+
+/// Run upgrade analysis on a skill directory.
+///
+/// Checks for missing best-practice fields and returns a list of human-readable
+/// suggestions. With `apply = true`, attempts to add missing optional fields.
+fn run_upgrade(
+    dir: &std::path::Path,
+    apply: bool,
+) -> std::result::Result<Vec<String>, aigent::AigentError> {
+    let props = aigent::read_properties(dir)?;
+    let mut suggestions = Vec::new();
+
+    // Check for missing compatibility field.
+    if props.compatibility.is_none() {
+        suggestions.push(
+            "Missing 'compatibility' field — recommended for multi-platform skills.".to_string(),
+        );
+    }
+
+    // The parser stores the YAML `metadata:` block as a key named "metadata"
+    // inside the extra-fields HashMap. So metadata.version becomes
+    // props.metadata["metadata"]["version"].
+    let meta_block = props
+        .metadata
+        .as_ref()
+        .and_then(|m| m.get("metadata"))
+        .and_then(|v| {
+            if let serde_yaml_ng::Value::Mapping(map) = v {
+                Some(map.clone())
+            } else {
+                None
+            }
+        });
+
+    // Check for missing metadata.version.
+    let has_version = meta_block
+        .as_ref()
+        .and_then(|m| m.get(serde_yaml_ng::Value::String("version".to_string())))
+        .is_some();
+    if !has_version {
+        suggestions.push(
+            "Missing 'metadata.version' — recommended for tracking skill versions.".to_string(),
+        );
+    }
+
+    // Check for missing metadata.author.
+    let has_author = meta_block
+        .as_ref()
+        .and_then(|m| m.get(serde_yaml_ng::Value::String("author".to_string())))
+        .is_some();
+    if !has_author {
+        suggestions.push("Missing 'metadata.author' — recommended for attribution.".to_string());
+    }
+
+    // Check for missing trigger phrase in description.
+    let desc_lower = props.description.to_lowercase();
+    if !desc_lower.contains("use when") && !desc_lower.contains("use this when") {
+        suggestions.push(
+            "Description lacks 'Use when...' trigger phrase — helps Claude activate the skill."
+                .to_string(),
+        );
+    }
+
+    // Check body length.
+    let body = read_body(dir);
+    let line_count = body.lines().count();
+    if line_count > 500 {
+        suggestions.push(format!(
+            "Body is {line_count} lines — consider splitting into reference files (recommended < 500)."
+        ));
+    }
+
+    // Apply upgrades if requested.
+    if apply && !suggestions.is_empty() {
+        if let Some(path) = aigent::find_skill_md(dir) {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok((raw_map, body)) = aigent::parse_frontmatter(&content) {
+                    let mut updated_yaml = String::new();
+                    // Re-serialize frontmatter with additions.
+                    // We simply append missing fields to existing frontmatter.
+                    let existing_front = content
+                        .lines()
+                        .skip(1) // skip opening ---
+                        .take_while(|l| *l != "---")
+                        .collect::<Vec<_>>()
+                        .join("\n");
+
+                    updated_yaml.push_str(&existing_front);
+
+                    if props.compatibility.is_none() && !raw_map.contains_key("compatibility") {
+                        updated_yaml.push_str("\ncompatibility: claude-code");
+                    }
+
+                    if !has_version || !has_author {
+                        // Only add metadata block if no metadata: key exists at all.
+                        if meta_block.is_none() {
+                            updated_yaml.push_str("\nmetadata:");
+                            if !has_version {
+                                updated_yaml.push_str("\n  version: '0.1.0'");
+                            }
+                            if !has_author {
+                                updated_yaml.push_str("\n  author: unknown");
+                            }
+                        }
+                    }
+
+                    let new_content = format!("---\n{updated_yaml}\n---\n{body}");
+                    if new_content != content {
+                        std::fs::write(&path, new_content).unwrap_or_else(|e| {
+                            eprintln!("aigent upgrade: failed to write {}: {e}", path.display());
+                        });
+                        eprintln!("Applied upgrades to {}", path.display());
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(suggestions)
 }

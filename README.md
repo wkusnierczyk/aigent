@@ -70,7 +70,19 @@ aigent init my-skill/
 aigent build "Process PDF files and extract text" --no-llm
 
 # Validate a skill directory
-aigent validate my-skill/
+aigent validate my-skill/ --lint --structure
+
+# Score a skill against best practices (0–100)
+aigent score my-skill/
+
+# Test skill activation against a query
+aigent test my-skill/ "process PDF files"
+
+# Check for upgrade opportunities
+aigent upgrade my-skill/
+
+# Generate a skill catalog
+aigent doc skills/ --recursive
 
 # Read skill properties as JSON
 aigent read-properties my-skill/
@@ -227,6 +239,28 @@ aigent implements **all** rules from the specification, plus additional checks
 (Unicode NFKC normalization, path canonicalization, post-build validation) that
 go beyond both the specification and the reference implementation.
 
+### Extras
+
+Features in aigent that go beyond the specification and reference implementation:
+
+| Feature | Description |
+|---------|-------------|
+| Semantic linting | Quality checks: third-person descriptions, trigger phrases, gerund names, generic names |
+| Quality scoring | Weighted 0–100 score combining structural validation and semantic lint |
+| Auto-fix | Automatic correction of fixable issues (e.g., name casing) |
+| Skill builder | Generate skills from natural language (deterministic + multi-provider LLM) |
+| Interactive build | Step-by-step confirmation mode for skill generation |
+| Skill tester | Simulate skill activation against sample user queries |
+| Skill upgrade | Detect and apply best-practice upgrades (compatibility, metadata, trigger phrases) |
+| Directory structure validation | Check for missing references, script permissions, nesting depth |
+| Cross-skill conflict detection | Name collisions, description similarity, token budget analysis |
+| Documentation generation | Markdown skill catalog with diff-aware output |
+| Watch mode | Continuous validation on filesystem changes (optional `notify` feature) |
+| Multi-format prompt output | XML, JSON, YAML, Markdown prompt generation |
+| Multi-format validation output | Text and JSON diagnostic output |
+| Token budget estimation | Per-skill and total token usage reporting |
+| Claude Code plugin | Hybrid skills that work with or without the CLI installed |
+
 ## CLI Reference
 
 Run `aigent --help` for built-in documentation. Full API documentation is
@@ -236,11 +270,29 @@ available at [docs.rs/aigent](https://docs.rs/aigent).
 
 <table>
 <tr><th width="280">Command</th><th>Description</th></tr>
-<tr><td><code>validate &lt;directory&gt;</code></td><td>Validate a skill directory; exit 0 if valid</td></tr>
+<tr><td><code>validate &lt;dirs...&gt;</code></td><td>Validate skill directories; exit 0 if valid</td></tr>
+<tr><td><code>lint &lt;directory&gt;</code></td><td>Run semantic lint checks on a skill</td></tr>
+<tr><td><code>score &lt;directory&gt;</code></td><td>Score a skill against best-practices checklist (0–100)</td></tr>
+<tr><td><code>test &lt;directory&gt; &lt;query&gt;</code></td><td>Test skill activation against a sample user query</td></tr>
+<tr><td><code>upgrade &lt;directory&gt;</code></td><td>Check a skill for upgrade opportunities</td></tr>
+<tr><td><code>doc &lt;dirs...&gt;</code></td><td>Generate a markdown skill catalog</td></tr>
 <tr><td><code>read-properties &lt;directory&gt;</code></td><td>Output skill properties as JSON</td></tr>
-<tr><td><code>to-prompt &lt;directories...&gt;</code></td><td>Generate <code>&lt;available_skills&gt;</code> XML block</td></tr>
+<tr><td><code>to-prompt &lt;dirs...&gt;</code></td><td>Generate <code>&lt;available_skills&gt;</code> XML block</td></tr>
 <tr><td><code>build &lt;purpose&gt;</code></td><td>Build a skill from natural language</td></tr>
 <tr><td><code>init [directory]</code></td><td>Create a template SKILL.md</td></tr>
+</table>
+
+### Validate Flags
+
+<table>
+<tr><th width="280">Flag</th><th>Description</th></tr>
+<tr><td><code>--lint</code></td><td>Run semantic lint checks</td></tr>
+<tr><td><code>--structure</code></td><td>Run directory structure checks</td></tr>
+<tr><td><code>--recursive</code></td><td>Discover skills recursively</td></tr>
+<tr><td><code>--apply-fixes</code></td><td>Apply automatic fixes for fixable issues</td></tr>
+<tr><td><code>--watch</code></td><td>Watch for changes and re-validate (requires <code>watch</code> feature)</td></tr>
+<tr><td><code>--target &lt;TARGET&gt;</code></td><td>Validation target: <code>standard</code> or <code>claude-code</code></td></tr>
+<tr><td><code>--format &lt;FORMAT&gt;</code></td><td>Output format: <code>text</code> or <code>json</code></td></tr>
 </table>
 
 ### Build Flags
@@ -250,6 +302,7 @@ available at [docs.rs/aigent](https://docs.rs/aigent).
 <tr><td><code>--name &lt;NAME&gt;</code></td><td>Override the derived skill name</td></tr>
 <tr><td><code>--dir &lt;DIRECTORY&gt;</code></td><td>Output directory</td></tr>
 <tr><td><code>--no-llm</code></td><td>Force deterministic mode (no LLM)</td></tr>
+<tr><td><code>--interactive</code></td><td>Step-by-step confirmation mode</td></tr>
 </table>
 
 ### Global Flags
@@ -274,6 +327,10 @@ Full Rust API documentation with examples is published at
 | `SkillSpec` | `builder` | Input specification for skill generation (purpose, optional overrides) |
 | `BuildResult` | `builder` | Build output (properties, files written, output directory) |
 | `ClarityAssessment` | `builder` | Purpose clarity evaluation result (clear flag, follow-up questions) |
+| `Diagnostic` | `diagnostics` | Structured diagnostic with severity, code, message, field, suggestion |
+| `ScoreResult` | `scorer` | Quality score result with structural and semantic categories |
+| `TestResult` | `tester` | Skill activation test result (query match, diagnostics, token cost) |
+| `SkillEntry` | `prompt` | Collected skill entry for prompt generation (name, description, location) |
 | `AigentError` | `errors` | Error enum: `Parse`, `Validation`, `Build`, `Io`, `Yaml` |
 | `Result<T>` | `errors` | Convenience alias for `std::result::Result<T, AigentError>` |
 
@@ -281,16 +338,23 @@ Full Rust API documentation with examples is published at
 
 | Function | Module | Description |
 |----------|--------|-------------|
-| `validate(&Path) -> Vec<String>` | `validator` | Validate skill directory, return errors and warnings |
-| `validate_metadata(&HashMap, Option<&Path>) -> Vec<String>` | `validator` | Validate metadata hash, return errors and warnings |
+| `validate(&Path) -> Vec<Diagnostic>` | `validator` | Validate skill directory |
+| `validate_with_target(&Path, ValidationTarget)` | `validator` | Validate with target profile |
 | `read_properties(&Path) -> Result<SkillProperties>` | `parser` | Parse directory into `SkillProperties` |
 | `find_skill_md(&Path) -> Option<PathBuf>` | `parser` | Find `SKILL.md` in directory (prefers uppercase) |
 | `parse_frontmatter(&str) -> Result<(HashMap, String)>` | `parser` | Split YAML frontmatter and body |
 | `to_prompt(&[&Path]) -> String` | `prompt` | Generate `<available_skills>` XML system prompt |
+| `to_prompt_format(&[&Path], PromptFormat) -> String` | `prompt` | Generate prompt in specified format |
+| `lint(&SkillProperties, &str) -> Vec<Diagnostic>` | `linter` | Run semantic quality checks |
+| `score(&Path) -> ScoreResult` | `scorer` | Score skill against best-practices checklist |
+| `test_skill(&Path, &str) -> Result<TestResult>` | `tester` | Test skill activation against a query |
+| `validate_structure(&Path) -> Vec<Diagnostic>` | `structure` | Validate directory structure |
+| `detect_conflicts(&[SkillEntry]) -> Vec<Diagnostic>` | `conflict` | Detect cross-skill conflicts |
+| `apply_fixes(&Path, &[Diagnostic]) -> Result<usize>` | `fixer` | Apply automatic fixes |
 | `build_skill(&SkillSpec) -> Result<BuildResult>` | `builder` | Full build pipeline with post-build validation |
 | `derive_name(&str) -> String` | `builder` | Derive kebab-case name from purpose (deterministic) |
 | `assess_clarity(&str) -> ClarityAssessment` | `builder` | Evaluate if purpose is clear enough for generation |
-| `init_skill(&Path) -> Result<PathBuf>` | `builder` | Initialize skill directory with template SKILL.md |
+| `init_skill(&Path, SkillTemplate) -> Result<PathBuf>` | `builder` | Initialize skill directory with template SKILL.md |
 
 ### Traits
 
@@ -302,8 +366,8 @@ Full Rust API documentation with examples is published at
 
 This repository is a
 [Claude Code plugin](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/extensions#custom-slash-commands).
-It provides two skills that Claude can use to build and validate SKILL.md files
-interactively.
+It provides three skills that Claude can use to build, validate, and score
+SKILL.md files interactively.
 
 ### Skills
 
@@ -311,8 +375,9 @@ interactively.
 |-------|-------------|
 | `aigent-builder` | Generates skill definitions from natural language. Triggered by "create a skill", "build a skill", etc. |
 | `aigent-validator` | Validates skills against the Anthropic specification. Triggered by "validate a skill", "check a skill", etc. |
+| `aigent-scorer` | Scores skills against best-practices checklist. Triggered by "score a skill", "rate a skill", etc. |
 
-Both skills operate in **hybrid mode**: they use the `aigent` CLI when it is
+All skills operate in **hybrid mode**: they use the `aigent` CLI when it is
 installed, and fall back to Claude-based generation/validation when it is not.
 This means the plugin works out of the box — no installation required — but
 produces higher-quality results with `aigent` available.
@@ -368,7 +433,14 @@ src/
 ├── models.rs                       # SkillProperties (serde)
 ├── parser.rs                       # SKILL.md frontmatter parser (serde_yaml_ng)
 ├── validator.rs                    # Metadata and directory validator
-├── prompt.rs                       # XML prompt generation
+├── linter.rs                       # Semantic lint checks
+├── fixer.rs                        # Auto-fix for fixable diagnostics
+├── diagnostics.rs                  # Structured diagnostics with error codes
+├── prompt.rs                       # Multi-format prompt generation
+├── scorer.rs                       # Quality scoring (0–100)
+├── structure.rs                    # Directory structure validation
+├── conflict.rs                     # Cross-skill conflict detection
+├── tester.rs                       # Skill activation tester/previewer
 ├── main.rs                         # CLI entry point (clap)
 └── builder/
     ├── mod.rs                      # Build pipeline orchestration

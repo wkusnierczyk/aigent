@@ -23,6 +23,8 @@
 
 /// Skill builder: deterministic and LLM-enhanced skill generation.
 pub mod builder;
+/// Cross-skill conflict detection for skill collections.
+pub mod conflict;
 /// Structured diagnostics for validation, linting, and error reporting.
 pub mod diagnostics;
 /// Error types for skill operations.
@@ -37,10 +39,17 @@ pub mod models;
 pub mod parser;
 /// Multi-format prompt generation for LLM injection.
 pub mod prompt;
+/// Quality scoring for skill best-practices compliance.
+pub mod scorer;
+/// Directory structure validation for skill packages.
+pub mod structure;
+/// Skill tester and previewer for evaluation-driven development.
+pub mod tester;
 /// Skill directory and metadata validator.
 pub mod validator;
 
 // Re-export key types at crate root for convenience.
+pub use conflict::{detect_conflicts, detect_conflicts_with_threshold};
 #[doc(inline)]
 pub use diagnostics::{Diagnostic, Severity, ValidationTarget};
 #[doc(inline)]
@@ -54,6 +63,9 @@ pub use prompt::{
     collect_skills, estimate_tokens, format_budget, to_prompt, to_prompt_format, PromptFormat,
     SkillEntry,
 };
+pub use scorer::{score, ScoreResult};
+pub use structure::validate_structure;
+pub use tester::{test_skill, TestResult};
 pub use validator::{
     discover_skills, known_keys_for, validate, validate_metadata, validate_metadata_with_target,
     validate_with_target,
