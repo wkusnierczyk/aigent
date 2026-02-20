@@ -6,7 +6,11 @@ use regex::Regex;
 use serde_yaml_ng::Value;
 use unicode_normalization::UnicodeNormalization;
 
-use crate::parser::{find_skill_md, parse_frontmatter, KNOWN_KEYS};
+use crate::diagnostics::{
+    Diagnostic, Severity, ValidationTarget, E000, E001, E002, E003, E004, E005, E006, E007, E009,
+    E010, E011, E012, E013, E014, E015, E016, E017, E018, W001, W002,
+};
+use crate::parser::{find_skill_md, parse_frontmatter, CLAUDE_CODE_KEYS, KNOWN_KEYS};
 
 /// Reserved words that must not appear as hyphen-delimited segments in a skill name.
 const RESERVED_WORDS: &[&str] = &["anthropic", "claude"];
@@ -23,23 +27,74 @@ fn contains_xml_tags(s: &str) -> bool {
     XML_TAG_RE.is_match(s)
 }
 
+/// Returns the set of known keys for the given validation target.
+#[must_use]
+pub fn known_keys_for(target: ValidationTarget) -> Vec<&'static str> {
+    match target {
+        ValidationTarget::Standard => KNOWN_KEYS.to_vec(),
+        ValidationTarget::ClaudeCode => {
+            let mut keys = KNOWN_KEYS.to_vec();
+            keys.extend_from_slice(CLAUDE_CODE_KEYS);
+            keys
+        }
+        ValidationTarget::Permissive => vec![],
+    }
+}
+
+/// Collapse consecutive hyphens into a single hyphen.
+fn collapse_hyphens(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut prev_hyphen = false;
+    for c in s.chars() {
+        if c == '-' {
+            if !prev_hyphen {
+                result.push(c);
+            }
+            prev_hyphen = true;
+        } else {
+            result.push(c);
+            prev_hyphen = false;
+        }
+    }
+    result
+}
+
 /// Validate a skill name after NFKC normalization.
-fn validate_name(name: &str, dir: Option<&Path>) -> Vec<String> {
-    let mut errors = Vec::new();
+fn validate_name(name: &str, dir: Option<&Path>) -> Vec<Diagnostic> {
+    let mut diags = Vec::new();
     let normalized: String = name.nfkc().collect();
 
     // 1. Non-empty.
     if normalized.is_empty() {
-        errors.push("name must not be empty".to_string());
-        return errors;
+        diags.push(
+            Diagnostic::new(Severity::Error, E001, "name must not be empty").with_field("name"),
+        );
+        return diags;
     }
 
     // 2. Max length.
     if normalized.chars().count() > 64 {
-        errors.push("name exceeds 64 characters".to_string());
+        // Find the last hyphen at or before position 64 to truncate cleanly.
+        let truncated: String = {
+            let s: String = normalized.chars().take(64).collect();
+            if let Some(pos) = s.rfind('-') {
+                s[..pos].to_string()
+            } else {
+                s
+            }
+        };
+        diags.push(
+            Diagnostic::new(Severity::Error, E002, "name exceeds 64 characters")
+                .with_field("name")
+                .with_suggestion(format!("Truncate to: '{truncated}'")),
+        );
     }
 
     // 3. Character validation: a-z, 0-9, hyphen, or alphabetic non-uppercase.
+    //    Collect invalid chars and uppercase chars separately so we can emit
+    //    one E003 diagnostic per category rather than one per character.
+    let mut invalid_chars: Vec<char> = Vec::new();
+    let mut has_uppercase = false;
     for c in normalized.chars() {
         if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' {
             continue;
@@ -47,28 +102,70 @@ fn validate_name(name: &str, dir: Option<&Path>) -> Vec<String> {
         if c.is_alphabetic() && !c.is_uppercase() {
             continue;
         }
-        errors.push(format!("name contains invalid character: '{c}'"));
+        if c.is_uppercase() {
+            has_uppercase = true;
+        } else {
+            invalid_chars.push(c);
+        }
+    }
+    // Emit one diagnostic for uppercase characters.
+    if has_uppercase {
+        let lowered = normalized.to_lowercase();
+        diags.push(
+            Diagnostic::new(Severity::Error, E003, "name contains uppercase characters")
+                .with_field("name")
+                .with_suggestion(format!("Use lowercase: '{lowered}'")),
+        );
+    }
+    // Emit one diagnostic per truly invalid (non-uppercase) character.
+    for c in invalid_chars {
+        diags.push(
+            Diagnostic::new(
+                Severity::Error,
+                E003,
+                format!("name contains invalid character: '{c}'"),
+            )
+            .with_field("name"),
+        );
     }
 
     // 4. No leading hyphen.
     if normalized.starts_with('-') {
-        errors.push("name must not start with a hyphen".to_string());
+        diags.push(
+            Diagnostic::new(Severity::Error, E004, "name must not start with a hyphen")
+                .with_field("name"),
+        );
     }
 
     // 5. No trailing hyphen.
     if normalized.ends_with('-') {
-        errors.push("name must not end with a hyphen".to_string());
+        diags.push(
+            Diagnostic::new(Severity::Error, E005, "name must not end with a hyphen")
+                .with_field("name"),
+        );
     }
 
     // 6. No consecutive hyphens.
     if normalized.contains("--") {
-        errors.push("name contains consecutive hyphens".to_string());
+        let collapsed = collapse_hyphens(&normalized);
+        diags.push(
+            Diagnostic::new(Severity::Error, E006, "name contains consecutive hyphens")
+                .with_field("name")
+                .with_suggestion(format!("Remove consecutive hyphens: '{collapsed}'")),
+        );
     }
 
     // 7. Reserved words — checked as hyphen-delimited segments.
     for word in RESERVED_WORDS {
         if normalized.split('-').any(|seg| seg == *word) {
-            errors.push(format!("name contains reserved word: '{word}'"));
+            diags.push(
+                Diagnostic::new(
+                    Severity::Error,
+                    E007,
+                    format!("name contains reserved word: '{word}'"),
+                )
+                .with_field("name"),
+            );
         }
     }
 
@@ -77,45 +174,69 @@ fn validate_name(name: &str, dir: Option<&Path>) -> Vec<String> {
         if let Some(dir_name) = dir.file_name().and_then(|n| n.to_str()) {
             let dir_normalized: String = dir_name.nfkc().collect();
             if normalized != dir_normalized {
-                errors.push(format!(
-                    "name '{normalized}' does not match directory name '{dir_normalized}'"
-                ));
+                diags.push(
+                    Diagnostic::new(
+                        Severity::Error,
+                        E009,
+                        format!(
+                            "name '{normalized}' does not match directory name '{dir_normalized}'"
+                        ),
+                    )
+                    .with_field("name"),
+                );
             }
         }
     }
 
-    errors
+    diags
 }
 
 /// Validate a skill description.
-fn validate_description(description: &str) -> Vec<String> {
-    let mut errors = Vec::new();
+fn validate_description(description: &str) -> Vec<Diagnostic> {
+    let mut diags = Vec::new();
 
     if description.is_empty() {
-        errors.push("description must not be empty".to_string());
-        return errors;
+        diags.push(
+            Diagnostic::new(Severity::Error, E010, "description must not be empty")
+                .with_field("description"),
+        );
+        return diags;
     }
 
     if description.chars().count() > 1024 {
-        errors.push("description exceeds 1024 characters".to_string());
+        diags.push(
+            Diagnostic::new(Severity::Error, E011, "description exceeds 1024 characters")
+                .with_field("description"),
+        );
     }
 
     if contains_xml_tags(description) {
-        errors.push("description contains XML/HTML tags".to_string());
+        diags.push(
+            Diagnostic::new(Severity::Error, E012, "description contains XML/HTML tags")
+                .with_field("description")
+                .with_suggestion("Remove XML tags from description"),
+        );
     }
 
-    errors
+    diags
 }
 
 /// Validate a compatibility string.
-fn validate_compatibility(compatibility: &str) -> Vec<String> {
-    let mut errors = Vec::new();
+fn validate_compatibility(compatibility: &str) -> Vec<Diagnostic> {
+    let mut diags = Vec::new();
 
     if compatibility.chars().count() > 500 {
-        errors.push("compatibility exceeds 500 characters".to_string());
+        diags.push(
+            Diagnostic::new(
+                Severity::Error,
+                E013,
+                "compatibility exceeds 500 characters",
+            )
+            .with_field("compatibility"),
+        );
     }
 
-    errors
+    diags
 }
 
 /// Validate skill metadata against the Anthropic specification.
@@ -124,86 +245,190 @@ fn validate_compatibility(compatibility: &str) -> Vec<String> {
 /// known-key extraction. **Not** suitable for use on
 /// `SkillProperties.metadata` (which has known keys already removed).
 ///
-/// Returns a list of error/warning strings (empty = valid).
-/// Warnings are prefixed with `"warning: "`.
+/// Returns a list of diagnostics (empty = valid).
 #[must_use]
-pub fn validate_metadata(metadata: &HashMap<String, Value>, dir: Option<&Path>) -> Vec<String> {
-    let mut messages = Vec::new();
+pub fn validate_metadata(metadata: &HashMap<String, Value>, dir: Option<&Path>) -> Vec<Diagnostic> {
+    validate_metadata_with_target(metadata, dir, ValidationTarget::Standard)
+}
+
+/// Validate skill metadata with a specific validation target profile.
+///
+/// The `target` controls which fields are considered known:
+/// - `Standard`: only Anthropic specification fields
+/// - `ClaudeCode`: specification fields plus Claude Code extension fields
+/// - `Permissive`: no unknown-field warnings
+#[must_use]
+pub fn validate_metadata_with_target(
+    metadata: &HashMap<String, Value>,
+    dir: Option<&Path>,
+    target: ValidationTarget,
+) -> Vec<Diagnostic> {
+    let mut diags = Vec::new();
 
     // 1. Validate name.
     match metadata.get("name") {
         Some(Value::String(name)) => {
-            messages.extend(validate_name(name, dir));
+            diags.extend(validate_name(name, dir));
         }
-        Some(_) => messages.push("`name` must be a string".to_string()),
-        None => messages.push("missing required field `name`".to_string()),
+        Some(_) => diags.push(
+            Diagnostic::new(Severity::Error, E014, "`name` must be a string").with_field("name"),
+        ),
+        None => diags.push(
+            Diagnostic::new(Severity::Error, E017, "missing required field `name`")
+                .with_field("name"),
+        ),
     }
 
     // 2. Validate description.
     match metadata.get("description") {
         Some(Value::String(desc)) => {
-            messages.extend(validate_description(desc));
+            diags.extend(validate_description(desc));
         }
-        Some(_) => messages.push("`description` must be a string".to_string()),
-        None => messages.push("missing required field `description`".to_string()),
+        Some(_) => diags.push(
+            Diagnostic::new(Severity::Error, E015, "`description` must be a string")
+                .with_field("description"),
+        ),
+        None => diags.push(
+            Diagnostic::new(
+                Severity::Error,
+                E018,
+                "missing required field `description`",
+            )
+            .with_field("description"),
+        ),
     }
 
     // 3. Validate compatibility if present.
     if let Some(val) = metadata.get("compatibility") {
         match val {
-            Value::String(s) => messages.extend(validate_compatibility(s)),
-            _ => messages.push("`compatibility` must be a string".to_string()),
+            Value::String(s) => diags.extend(validate_compatibility(s)),
+            _ => diags.push(
+                Diagnostic::new(Severity::Error, E016, "`compatibility` must be a string")
+                    .with_field("compatibility"),
+            ),
         }
     }
 
     // 4. Warn about unexpected metadata keys (sorted for deterministic output).
-    let mut keys: Vec<_> = metadata.keys().collect();
-    keys.sort();
-    for key in keys {
-        if !KNOWN_KEYS.contains(&key.as_str()) {
-            messages.push(format!("warning: unexpected metadata field: '{key}'"));
+    if target != ValidationTarget::Permissive {
+        let known = known_keys_for(target);
+        let mut keys: Vec<_> = metadata.keys().collect();
+        keys.sort();
+        for key in keys {
+            if !known.contains(&key.as_str()) {
+                diags.push(
+                    Diagnostic::new(
+                        Severity::Warning,
+                        W001,
+                        format!("unexpected metadata field: '{key}'"),
+                    )
+                    .with_field("metadata"),
+                );
+            }
         }
     }
 
-    messages
+    diags
 }
 
 /// Validate a skill directory: find SKILL.md, parse, and check all rules.
 ///
-/// Returns a list of error/warning strings (empty = valid).
-/// Warnings are prefixed with `"warning: "`.
+/// Returns a list of diagnostics (empty = valid).
 #[must_use]
-pub fn validate(dir: &Path) -> Vec<String> {
+pub fn validate(dir: &Path) -> Vec<Diagnostic> {
+    validate_with_target(dir, ValidationTarget::Standard)
+}
+
+/// Validate a skill directory with a specific validation target profile.
+///
+/// Returns a list of diagnostics (empty = valid).
+#[must_use]
+pub fn validate_with_target(dir: &Path, target: ValidationTarget) -> Vec<Diagnostic> {
     // 1. Find SKILL.md.
     let path = match find_skill_md(dir) {
         Some(p) => p,
-        None => return vec!["SKILL.md not found".to_string()],
+        None => return vec![Diagnostic::new(Severity::Error, E000, "SKILL.md not found")],
     };
 
     // 2. Read the file.
     let content = match std::fs::read_to_string(&path) {
         Ok(c) => c,
-        Err(e) => return vec![format!("IO error: {e}")],
+        Err(e) => {
+            return vec![Diagnostic::new(
+                Severity::Error,
+                E000,
+                format!("IO error: {e}"),
+            )]
+        }
     };
 
     // 3. Parse frontmatter.
     let (metadata, body) = match parse_frontmatter(&content) {
         Ok(result) => result,
-        Err(e) => return vec![e.to_string()],
+        Err(e) => return vec![Diagnostic::new(Severity::Error, E000, e.to_string())],
     };
 
     // 4. Validate metadata.
-    let mut messages = validate_metadata(&metadata, Some(dir));
+    let mut diags = validate_metadata_with_target(&metadata, Some(dir), target);
 
     // 5. Body-length warning.
     let line_count = body.lines().count();
     if line_count > 500 {
-        messages.push(format!(
-            "warning: body exceeds 500 lines ({line_count} lines)"
-        ));
+        diags.push(
+            Diagnostic::new(
+                Severity::Warning,
+                W002,
+                format!("body exceeds 500 lines ({line_count} lines)"),
+            )
+            .with_field("body"),
+        );
     }
 
-    messages
+    diags
+}
+
+/// Discover all skill directories under a root path.
+///
+/// Walks the directory tree recursively, finding all `SKILL.md` or
+/// `skill.md` files. Returns the parent directory of each found file.
+/// Skips hidden directories (names starting with `.`).
+#[must_use]
+pub fn discover_skills(root: &Path) -> Vec<std::path::PathBuf> {
+    let mut dirs = Vec::new();
+    discover_skills_recursive(root, &mut dirs);
+    dirs.sort();
+    dirs
+}
+
+/// Recursive helper for `discover_skills`.
+fn discover_skills_recursive(dir: &Path, results: &mut Vec<std::path::PathBuf>) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    let mut has_skill_md = false;
+    let mut subdirs = Vec::new();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if path.is_file() && (name == "SKILL.md" || name == "skill.md") {
+                has_skill_md = true;
+            }
+            if path.is_dir() && !name.starts_with('.') {
+                subdirs.push(path);
+            }
+        }
+    }
+
+    if has_skill_md {
+        results.push(dir.to_path_buf());
+    }
+
+    for subdir in subdirs {
+        discover_skills_recursive(&subdir, results);
+    }
 }
 
 #[cfg(test)]
@@ -241,116 +466,123 @@ mod tests {
             ("compatibility", "claude-3"),
             ("allowed-tools", "Bash, Read"),
         ]);
-        let errors = validate_metadata(&meta, None);
-        assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
+        let diags = validate_metadata(&meta, None);
+        assert!(diags.is_empty(), "expected no diagnostics, got: {diags:?}");
     }
 
     #[test]
     fn missing_name() {
         let meta = make_metadata(&[("description", "desc")]);
-        let errors = validate_metadata(&meta, None);
-        assert!(errors.iter().any(|e| e.contains("name")));
+        let diags = validate_metadata(&meta, None);
+        assert!(diags.iter().any(|d| d.message.contains("name")));
     }
 
     #[test]
     fn missing_description() {
         let meta = make_metadata(&[("name", "test")]);
-        let errors = validate_metadata(&meta, None);
-        assert!(errors.iter().any(|e| e.contains("description")));
+        let diags = validate_metadata(&meta, None);
+        assert!(diags.iter().any(|d| d.message.contains("description")));
     }
 
     #[test]
     fn empty_name() {
         let meta = make_metadata(&[("name", ""), ("description", "desc")]);
-        let errors = validate_metadata(&meta, None);
-        assert!(errors.iter().any(|e| e.contains("name must not be empty")));
+        let diags = validate_metadata(&meta, None);
+        assert!(diags
+            .iter()
+            .any(|d| d.message.contains("name must not be empty")));
     }
 
     #[test]
     fn empty_description() {
         let meta = make_metadata(&[("name", "test"), ("description", "")]);
-        let errors = validate_metadata(&meta, None);
-        assert!(errors
+        let diags = validate_metadata(&meta, None);
+        assert!(diags
             .iter()
-            .any(|e| e.contains("description must not be empty")));
+            .any(|d| d.message.contains("description must not be empty")));
     }
 
     #[test]
     fn name_too_long() {
         let long_name: String = "a".repeat(65);
         let meta = make_metadata(&[("name", &long_name), ("description", "desc")]);
-        let errors = validate_metadata(&meta, None);
-        assert!(errors.iter().any(|e| e.contains("exceeds 64 characters")));
+        let diags = validate_metadata(&meta, None);
+        assert!(diags
+            .iter()
+            .any(|d| d.message.contains("exceeds 64 characters")));
     }
 
     #[test]
     fn name_exactly_64_chars() {
         let name: String = "a".repeat(64);
         let meta = make_metadata(&[("name", &name), ("description", "desc")]);
-        let errors = validate_metadata(&meta, None);
-        let real_errors: Vec<_> = errors
-            .iter()
-            .filter(|e| !e.starts_with("warning: "))
-            .collect();
-        assert!(
-            real_errors.is_empty(),
-            "expected no errors, got: {real_errors:?}"
-        );
+        let diags = validate_metadata(&meta, None);
+        let errors: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
+        assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
     }
 
     #[test]
     fn name_with_uppercase() {
         let meta = make_metadata(&[("name", "MySkill"), ("description", "desc")]);
-        let errors = validate_metadata(&meta, None);
-        assert!(errors.iter().any(|e| e.contains("invalid character")));
+        let diags = validate_metadata(&meta, None);
+        assert!(diags.iter().any(|d| d.message.contains("uppercase")));
+        // Should be a single E003 diagnostic, not one per character.
+        let e003_count = diags.iter().filter(|d| d.code == E003).count();
+        assert_eq!(e003_count, 1, "expected single E003, got {e003_count}");
     }
 
     #[test]
     fn name_with_leading_hyphen() {
         let meta = make_metadata(&[("name", "-my-skill"), ("description", "desc")]);
-        let errors = validate_metadata(&meta, None);
-        assert!(errors
+        let diags = validate_metadata(&meta, None);
+        assert!(diags
             .iter()
-            .any(|e| e.contains("must not start with a hyphen")));
+            .any(|d| d.message.contains("must not start with a hyphen")));
     }
 
     #[test]
     fn name_with_trailing_hyphen() {
         let meta = make_metadata(&[("name", "my-skill-"), ("description", "desc")]);
-        let errors = validate_metadata(&meta, None);
-        assert!(errors
+        let diags = validate_metadata(&meta, None);
+        assert!(diags
             .iter()
-            .any(|e| e.contains("must not end with a hyphen")));
+            .any(|d| d.message.contains("must not end with a hyphen")));
     }
 
     #[test]
     fn name_with_consecutive_hyphens() {
         let meta = make_metadata(&[("name", "my--skill"), ("description", "desc")]);
-        let errors = validate_metadata(&meta, None);
-        assert!(errors.iter().any(|e| e.contains("consecutive hyphens")));
+        let diags = validate_metadata(&meta, None);
+        assert!(diags
+            .iter()
+            .any(|d| d.message.contains("consecutive hyphens")));
     }
 
     #[test]
     fn name_with_invalid_characters() {
         let meta = make_metadata(&[("name", "my_skill!"), ("description", "desc")]);
-        let errors = validate_metadata(&meta, None);
-        assert!(errors.iter().any(|e| e.contains("invalid character")));
+        let diags = validate_metadata(&meta, None);
+        assert!(diags
+            .iter()
+            .any(|d| d.message.contains("invalid character")));
     }
 
     #[test]
     fn name_contains_reserved_anthropic() {
         let meta = make_metadata(&[("name", "my-anthropic-skill"), ("description", "desc")]);
-        let errors = validate_metadata(&meta, None);
-        assert!(errors
+        let diags = validate_metadata(&meta, None);
+        assert!(diags
             .iter()
-            .any(|e| e.contains("reserved word: 'anthropic'")));
+            .any(|d| d.message.contains("reserved word: 'anthropic'")));
     }
 
     #[test]
     fn name_contains_reserved_claude() {
         let meta = make_metadata(&[("name", "claude-helper"), ("description", "desc")]);
-        let errors = validate_metadata(&meta, None);
-        assert!(errors.iter().any(|e| e.contains("reserved word: 'claude'")));
+        let diags = validate_metadata(&meta, None);
+        assert!(diags
+            .iter()
+            .any(|d| d.message.contains("reserved word: 'claude'")));
     }
 
     #[test]
@@ -360,10 +592,10 @@ mod tests {
             "---\nname: my-skill\ndescription: desc\n---\n",
         );
         let meta = make_metadata(&[("name", "my-skill"), ("description", "desc")]);
-        let errors = validate_metadata(&meta, Some(&dir));
-        assert!(errors
+        let diags = validate_metadata(&meta, Some(&dir));
+        assert!(diags
             .iter()
-            .any(|e| e.contains("does not match directory")));
+            .any(|d| d.message.contains("does not match directory")));
     }
 
     #[test]
@@ -371,40 +603,28 @@ mod tests {
         let (_parent, dir) =
             make_skill_dir("my-skill", "---\nname: my-skill\ndescription: desc\n---\n");
         let meta = make_metadata(&[("name", "my-skill"), ("description", "desc")]);
-        let errors = validate_metadata(&meta, Some(&dir));
-        let real_errors: Vec<_> = errors
-            .iter()
-            .filter(|e| !e.starts_with("warning: "))
-            .collect();
-        assert!(
-            real_errors.is_empty(),
-            "expected no errors, got: {real_errors:?}"
-        );
+        let diags = validate_metadata(&meta, Some(&dir));
+        let errors: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
+        assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
     }
 
     #[test]
     fn description_too_long() {
         let long_desc: String = "a".repeat(1025);
         let meta = make_metadata(&[("name", "test"), ("description", &long_desc)]);
-        let errors = validate_metadata(&meta, None);
-        assert!(errors
+        let diags = validate_metadata(&meta, None);
+        assert!(diags
             .iter()
-            .any(|e| e.contains("description exceeds 1024")));
+            .any(|d| d.message.contains("description exceeds 1024")));
     }
 
     #[test]
     fn description_exactly_1024_chars() {
         let desc: String = "a".repeat(1024);
         let meta = make_metadata(&[("name", "test"), ("description", &desc)]);
-        let errors = validate_metadata(&meta, None);
-        let real_errors: Vec<_> = errors
-            .iter()
-            .filter(|e| !e.starts_with("warning: "))
-            .collect();
-        assert!(
-            real_errors.is_empty(),
-            "expected no errors, got: {real_errors:?}"
-        );
+        let diags = validate_metadata(&meta, None);
+        let errors: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
+        assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
     }
 
     #[test]
@@ -413,21 +633,21 @@ mod tests {
             ("name", "test"),
             ("description", "A <script>alert</script> skill"),
         ]);
-        let errors = validate_metadata(&meta, None);
-        assert!(errors
+        let diags = validate_metadata(&meta, None);
+        assert!(diags
             .iter()
-            .any(|e| e.contains("description contains XML/HTML")));
+            .any(|d| d.message.contains("description contains XML/HTML")));
     }
 
     #[test]
     fn name_with_xml_characters_rejected() {
-        // XML-like characters are caught by the character validation (not a
-        // separate XML check), since `<`, `>`, and `/` are invalid in names.
         let meta = make_metadata(&[("name", "<img/>skill"), ("description", "desc")]);
-        let errors = validate_metadata(&meta, None);
+        let diags = validate_metadata(&meta, None);
         assert!(
-            errors.iter().any(|e| e.contains("invalid character")),
-            "expected invalid character error, got: {errors:?}"
+            diags
+                .iter()
+                .any(|d| d.message.contains("invalid character")),
+            "expected invalid character error, got: {diags:?}"
         );
     }
 
@@ -439,10 +659,10 @@ mod tests {
             ("description", "desc"),
             ("compatibility", &long_compat),
         ]);
-        let errors = validate_metadata(&meta, None);
-        assert!(errors
+        let diags = validate_metadata(&meta, None);
+        assert!(diags
             .iter()
-            .any(|e| e.contains("compatibility exceeds 500")));
+            .any(|d| d.message.contains("compatibility exceeds 500")));
     }
 
     #[test]
@@ -453,15 +673,9 @@ mod tests {
             ("description", "desc"),
             ("compatibility", &compat),
         ]);
-        let errors = validate_metadata(&meta, None);
-        let real_errors: Vec<_> = errors
-            .iter()
-            .filter(|e| !e.starts_with("warning: "))
-            .collect();
-        assert!(
-            real_errors.is_empty(),
-            "expected no errors, got: {real_errors:?}"
-        );
+        let diags = validate_metadata(&meta, None);
+        let errors: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
+        assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
     }
 
     #[test]
@@ -471,13 +685,10 @@ mod tests {
             ("description", "desc"),
             ("custom-field", "value"),
         ]);
-        let errors = validate_metadata(&meta, None);
-        let warnings: Vec<_> = errors
-            .iter()
-            .filter(|e| e.starts_with("warning: "))
-            .collect();
+        let diags = validate_metadata(&meta, None);
+        let warnings: Vec<_> = diags.iter().filter(|d| d.is_warning()).collect();
         assert!(
-            warnings.iter().any(|w| w.contains("custom-field")),
+            warnings.iter().any(|w| w.message.contains("custom-field")),
             "expected warning about custom-field, got: {warnings:?}"
         );
     }
@@ -491,8 +702,8 @@ mod tests {
             ("compatibility", "claude-3"),
             ("allowed-tools", "Bash"),
         ]);
-        let errors = validate_metadata(&meta, None);
-        assert!(errors.is_empty(), "expected no messages, got: {errors:?}");
+        let diags = validate_metadata(&meta, None);
+        assert!(diags.is_empty(), "expected no messages, got: {diags:?}");
     }
 
     // ── i18n / Unicode tests ─────────────────────────────────────────
@@ -500,53 +711,37 @@ mod tests {
     #[test]
     fn chinese_characters_accepted() {
         let meta = make_metadata(&[("name", "技能工具"), ("description", "desc")]);
-        let errors = validate_metadata(&meta, None);
-        let real_errors: Vec<_> = errors
-            .iter()
-            .filter(|e| !e.starts_with("warning: "))
-            .collect();
-        assert!(
-            real_errors.is_empty(),
-            "expected no errors, got: {real_errors:?}"
-        );
+        let diags = validate_metadata(&meta, None);
+        let errors: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
+        assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
     }
 
     #[test]
     fn russian_lowercase_with_hyphens_accepted() {
         let meta = make_metadata(&[("name", "навык-тест"), ("description", "desc")]);
-        let errors = validate_metadata(&meta, None);
-        let real_errors: Vec<_> = errors
-            .iter()
-            .filter(|e| !e.starts_with("warning: "))
-            .collect();
-        assert!(
-            real_errors.is_empty(),
-            "expected no errors, got: {real_errors:?}"
-        );
+        let diags = validate_metadata(&meta, None);
+        let errors: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
+        assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
     }
 
     #[test]
     fn uppercase_cyrillic_rejected() {
         let meta = make_metadata(&[("name", "Навык"), ("description", "desc")]);
-        let errors = validate_metadata(&meta, None);
+        let diags = validate_metadata(&meta, None);
         assert!(
-            errors.iter().any(|e| e.contains("invalid character")),
-            "expected error for uppercase Cyrillic, got: {errors:?}"
+            diags.iter().any(|d| d.code == E003),
+            "expected E003 for uppercase Cyrillic, got: {diags:?}"
         );
     }
 
     #[test]
     fn nfkc_normalization_applied() {
-        // ﬁ (U+FB01, Latin Small Ligature Fi) normalizes to "fi" under NFKC.
         let meta = make_metadata(&[("name", "s\u{FB01}le"), ("description", "desc")]);
-        let errors = validate_metadata(&meta, None);
-        let real_errors: Vec<_> = errors
-            .iter()
-            .filter(|e| !e.starts_with("warning: "))
-            .collect();
+        let diags = validate_metadata(&meta, None);
+        let errors: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
         assert!(
-            real_errors.is_empty(),
-            "NFKC-normalized 'sﬁle' → 'sfile' should be valid, got: {real_errors:?}"
+            errors.is_empty(),
+            "NFKC-normalized 'sﬁle' → 'sfile' should be valid, got: {errors:?}"
         );
     }
 
@@ -558,22 +753,24 @@ mod tests {
             "my-skill",
             "---\nname: my-skill\ndescription: A valid skill\n---\n# Body\n",
         );
-        let errors = validate(&dir);
-        assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
+        let diags = validate(&dir);
+        assert!(diags.is_empty(), "expected no diagnostics, got: {diags:?}");
     }
 
     #[test]
     fn validate_nonexistent_path() {
         let dir = std::path::Path::new("/nonexistent/path/that/does/not/exist");
-        let errors = validate(dir);
-        assert!(!errors.is_empty());
+        let diags = validate(dir);
+        assert!(!diags.is_empty());
     }
 
     #[test]
     fn validate_missing_skill_md() {
         let dir = tempdir().unwrap();
-        let errors = validate(dir.path());
-        assert!(errors.iter().any(|e| e.contains("SKILL.md not found")));
+        let diags = validate(dir.path());
+        assert!(diags
+            .iter()
+            .any(|d| d.message.contains("SKILL.md not found")));
     }
 
     #[test]
@@ -584,15 +781,12 @@ mod tests {
             .join("\n");
         let content = format!("---\nname: my-skill\ndescription: desc\n---\n{body}\n");
         let (_parent, dir) = make_skill_dir("my-skill", &content);
-        let errors = validate(&dir);
-        let warnings: Vec<_> = errors
-            .iter()
-            .filter(|e| e.starts_with("warning: "))
-            .collect();
+        let diags = validate(&dir);
+        let warnings: Vec<_> = diags.iter().filter(|d| d.is_warning()).collect();
         assert!(
             warnings
                 .iter()
-                .any(|w| w.contains("body exceeds 500 lines")),
+                .any(|w| w.message.contains("body exceeds 500 lines")),
             "expected body warning, got: {warnings:?}"
         );
     }
@@ -605,11 +799,8 @@ mod tests {
             .join("\n");
         let content = format!("---\nname: my-skill\ndescription: desc\n---\n{body}\n");
         let (_parent, dir) = make_skill_dir("my-skill", &content);
-        let errors = validate(&dir);
-        let warnings: Vec<_> = errors
-            .iter()
-            .filter(|e| e.starts_with("warning: "))
-            .collect();
+        let diags = validate(&dir);
+        let warnings: Vec<_> = diags.iter().filter(|d| d.is_warning()).collect();
         assert!(
             warnings.is_empty(),
             "expected no warnings, got: {warnings:?}"
@@ -618,16 +809,12 @@ mod tests {
 
     #[test]
     fn validate_multiple_errors_collected() {
-        // Empty name + empty description = multiple errors in one pass.
         let meta = make_metadata(&[("name", ""), ("description", "")]);
-        let errors = validate_metadata(&meta, None);
-        let real_errors: Vec<_> = errors
-            .iter()
-            .filter(|e| !e.starts_with("warning: "))
-            .collect();
+        let diags = validate_metadata(&meta, None);
+        let errors: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
         assert!(
-            real_errors.len() >= 2,
-            "expected at least 2 errors, got: {real_errors:?}"
+            errors.len() >= 2,
+            "expected at least 2 errors, got: {errors:?}"
         );
     }
 
@@ -635,12 +822,11 @@ mod tests {
 
     #[test]
     fn reserved_word_as_substring_accepted() {
-        // "claudette" contains "claude" as substring but NOT as a segment.
         let meta = make_metadata(&[("name", "claudette"), ("description", "desc")]);
-        let errors = validate_metadata(&meta, None);
-        let reserved_errors: Vec<_> = errors
+        let diags = validate_metadata(&meta, None);
+        let reserved_errors: Vec<_> = diags
             .iter()
-            .filter(|e| e.contains("reserved word"))
+            .filter(|d| d.message.contains("reserved word"))
             .collect();
         assert!(
             reserved_errors.is_empty(),
@@ -650,12 +836,193 @@ mod tests {
 
     #[test]
     fn reserved_word_as_exact_segment_rejected() {
-        // "my-claude-tool" has "claude" as an exact hyphen-delimited segment.
         let meta = make_metadata(&[("name", "my-claude-tool"), ("description", "desc")]);
-        let errors = validate_metadata(&meta, None);
+        let diags = validate_metadata(&meta, None);
         assert!(
-            errors.iter().any(|e| e.contains("reserved word: 'claude'")),
-            "expected reserved word error, got: {errors:?}"
+            diags
+                .iter()
+                .any(|d| d.message.contains("reserved word: 'claude'")),
+            "expected reserved word error, got: {diags:?}"
         );
+    }
+
+    // ── Diagnostic structure tests ───────────────────────────────────
+
+    #[test]
+    fn diagnostics_have_error_codes() {
+        let meta = make_metadata(&[("name", ""), ("description", "desc")]);
+        let diags = validate_metadata(&meta, None);
+        assert!(
+            diags.iter().all(|d| !d.code.is_empty()),
+            "all diagnostics should have error codes"
+        );
+    }
+
+    #[test]
+    fn diagnostics_have_fields() {
+        let meta = make_metadata(&[("name", ""), ("description", "")]);
+        let diags = validate_metadata(&meta, None);
+        let errors: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
+        assert!(
+            errors.iter().all(|d| d.field.is_some()),
+            "all error diagnostics should have field set"
+        );
+    }
+
+    #[test]
+    fn error_display_matches_original_format() {
+        let meta = make_metadata(&[("name", ""), ("description", "desc")]);
+        let diags = validate_metadata(&meta, None);
+        let name_error = diags
+            .iter()
+            .find(|d| d.code == E001)
+            .expect("should have E001");
+        assert_eq!(name_error.to_string(), "name must not be empty");
+    }
+
+    #[test]
+    fn warning_display_matches_original_format() {
+        let meta = make_metadata(&[
+            ("name", "test"),
+            ("description", "desc"),
+            ("custom-field", "value"),
+        ]);
+        let diags = validate_metadata(&meta, None);
+        let warning = diags
+            .iter()
+            .find(|d| d.code == W001)
+            .expect("should have W001");
+        assert_eq!(
+            warning.to_string(),
+            "warning: unexpected metadata field: 'custom-field'"
+        );
+    }
+
+    // ── ValidationTarget tests ───────────────────────────────────────
+
+    #[test]
+    fn claude_code_field_no_warning_with_claude_code_target() {
+        let meta = make_metadata(&[
+            ("name", "test"),
+            ("description", "desc"),
+            ("argument-hint", "[file]"),
+        ]);
+        let diags = validate_metadata_with_target(&meta, None, ValidationTarget::ClaudeCode);
+        let warnings: Vec<_> = diags.iter().filter(|d| d.is_warning()).collect();
+        assert!(
+            warnings.is_empty(),
+            "argument-hint should not warn with claude-code target, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn claude_code_field_warns_with_standard_target() {
+        let meta = make_metadata(&[
+            ("name", "test"),
+            ("description", "desc"),
+            ("argument-hint", "[file]"),
+        ]);
+        let diags = validate_metadata_with_target(&meta, None, ValidationTarget::Standard);
+        let warnings: Vec<_> = diags.iter().filter(|d| d.is_warning()).collect();
+        assert!(
+            warnings.iter().any(|w| w.message.contains("argument-hint")),
+            "argument-hint should warn with standard target, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn permissive_target_no_unknown_field_warnings() {
+        let meta = make_metadata(&[
+            ("name", "test"),
+            ("description", "desc"),
+            ("totally-custom", "value"),
+            ("another-custom", "value"),
+        ]);
+        let diags = validate_metadata_with_target(&meta, None, ValidationTarget::Permissive);
+        let warnings: Vec<_> = diags.iter().filter(|d| d.is_warning()).collect();
+        assert!(
+            warnings.is_empty(),
+            "permissive target should have no warnings, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn unknown_field_warns_even_with_claude_code_target() {
+        let meta = make_metadata(&[
+            ("name", "test"),
+            ("description", "desc"),
+            ("truly-unknown-field", "value"),
+        ]);
+        let diags = validate_metadata_with_target(&meta, None, ValidationTarget::ClaudeCode);
+        let warnings: Vec<_> = diags.iter().filter(|d| d.is_warning()).collect();
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.message.contains("truly-unknown-field")),
+            "truly unknown field should warn even with claude-code target, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn validate_backward_compat_matches_standard() {
+        let (_parent, dir) =
+            make_skill_dir("my-skill", "---\nname: my-skill\ndescription: desc\n---\n");
+        let standard = validate_with_target(&dir, ValidationTarget::Standard);
+        let default = validate(&dir);
+        assert_eq!(standard.len(), default.len());
+    }
+
+    // ── discover_skills tests ────────────────────────────────────────
+
+    #[test]
+    fn discover_skills_finds_skill_md() {
+        let parent = tempdir().unwrap();
+        let skill_dir = parent.path().join("my-skill");
+        fs::create_dir(&skill_dir).unwrap();
+        fs::write(skill_dir.join("SKILL.md"), "---\nname: test\n---\n").unwrap();
+        let dirs = discover_skills(parent.path());
+        assert_eq!(dirs.len(), 1);
+        assert_eq!(dirs[0], skill_dir);
+    }
+
+    #[test]
+    fn discover_skills_finds_nested() {
+        let parent = tempdir().unwrap();
+        let nested = parent.path().join("skills").join("my-skill");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("SKILL.md"), "---\nname: test\n---\n").unwrap();
+        let dirs = discover_skills(parent.path());
+        assert_eq!(dirs.len(), 1);
+        assert_eq!(dirs[0], nested);
+    }
+
+    #[test]
+    fn discover_skills_skips_hidden_dirs() {
+        let parent = tempdir().unwrap();
+        let hidden = parent.path().join(".hidden");
+        fs::create_dir(&hidden).unwrap();
+        fs::write(hidden.join("SKILL.md"), "---\nname: test\n---\n").unwrap();
+        let dirs = discover_skills(parent.path());
+        assert!(dirs.is_empty(), "should skip hidden directories");
+    }
+
+    #[test]
+    fn discover_skills_empty_dir() {
+        let parent = tempdir().unwrap();
+        let dirs = discover_skills(parent.path());
+        assert!(dirs.is_empty());
+    }
+
+    #[test]
+    fn discover_skills_multiple() {
+        let parent = tempdir().unwrap();
+        let skill_a = parent.path().join("skill-a");
+        let skill_b = parent.path().join("skill-b");
+        fs::create_dir(&skill_a).unwrap();
+        fs::create_dir(&skill_b).unwrap();
+        fs::write(skill_a.join("SKILL.md"), "---\nname: a\n---\n").unwrap();
+        fs::write(skill_b.join("SKILL.md"), "---\nname: b\n---\n").unwrap();
+        let dirs = discover_skills(parent.path());
+        assert_eq!(dirs.len(), 2);
     }
 }

@@ -129,6 +129,21 @@ pub const KNOWN_KEYS: &[&str] = &[
     "allowed-tools",
 ];
 
+/// Claude Code extension fields (recognized with `--target claude-code`).
+///
+/// These fields are not part of the base Anthropic specification but are
+/// recognized by Claude Code. Placed alongside `KNOWN_KEYS` as both define
+/// known metadata fields.
+pub const CLAUDE_CODE_KEYS: &[&str] = &[
+    "disable-model-invocation",
+    "user-invocable",
+    "context",
+    "agent",
+    "model",
+    "hooks",
+    "argument-hint",
+];
+
 /// Extract a required string field from metadata.
 ///
 /// Returns `AigentError::Validation` if the key is missing or not a string.
@@ -136,13 +151,22 @@ fn require_string(
     metadata: &HashMap<String, Value>,
     key: &str,
 ) -> std::result::Result<String, AigentError> {
+    use crate::diagnostics::{Diagnostic, Severity, E000};
     match metadata.get(key) {
         Some(Value::String(s)) => Ok(s.clone()),
         Some(_) => Err(AigentError::Validation {
-            errors: vec![format!("`{key}` must be a string")],
+            errors: vec![Diagnostic::new(
+                Severity::Error,
+                E000,
+                format!("`{key}` must be a string"),
+            )],
         }),
         None => Err(AigentError::Validation {
-            errors: vec![format!("missing required field `{key}`")],
+            errors: vec![Diagnostic::new(
+                Severity::Error,
+                E000,
+                format!("missing required field `{key}`"),
+            )],
         }),
     }
 }
@@ -154,10 +178,15 @@ fn optional_string(
     metadata: &HashMap<String, Value>,
     key: &str,
 ) -> std::result::Result<Option<String>, AigentError> {
+    use crate::diagnostics::{Diagnostic, Severity, E000};
     match metadata.get(key) {
         Some(Value::String(s)) => Ok(Some(s.clone())),
         Some(_) => Err(AigentError::Validation {
-            errors: vec![format!("`{key}` must be a string")],
+            errors: vec![Diagnostic::new(
+                Severity::Error,
+                E000,
+                format!("`{key}` must be a string"),
+            )],
         }),
         None => Ok(None),
     }

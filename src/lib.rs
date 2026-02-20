@@ -11,8 +11,8 @@
 //! use std::path::Path;
 //!
 //! // Validate a skill directory
-//! let errors = aigent::validate(Path::new("my-skill"));
-//! // errors will contain diagnostics if the skill is invalid
+//! let diags = aigent::validate(Path::new("my-skill"));
+//! let has_errors = diags.iter().any(|d| d.is_error());
 //!
 //! // Read skill properties
 //! let props = aigent::read_properties(Path::new("my-skill")).unwrap();
@@ -23,8 +23,14 @@
 
 /// Skill builder: deterministic and LLM-enhanced skill generation.
 pub mod builder;
+/// Structured diagnostics for validation, linting, and error reporting.
+pub mod diagnostics;
 /// Error types for skill operations.
 pub mod errors;
+/// Auto-fix application for fixable diagnostics.
+pub mod fixer;
+/// Semantic lint checks for skill quality improvement.
+pub mod linter;
 /// Data model for SKILL.md frontmatter properties.
 pub mod models;
 /// SKILL.md frontmatter parser.
@@ -36,12 +42,19 @@ pub mod validator;
 
 // Re-export key types at crate root for convenience.
 #[doc(inline)]
+pub use diagnostics::{Diagnostic, Severity, ValidationTarget};
+#[doc(inline)]
 pub use errors::{AigentError, Result};
+pub use fixer::apply_fixes;
+pub use linter::lint;
 #[doc(inline)]
 pub use models::SkillProperties;
-pub use parser::{find_skill_md, parse_frontmatter, read_properties, KNOWN_KEYS};
+pub use parser::{find_skill_md, parse_frontmatter, read_properties, CLAUDE_CODE_KEYS, KNOWN_KEYS};
 pub use prompt::to_prompt;
-pub use validator::{validate, validate_metadata};
+pub use validator::{
+    discover_skills, known_keys_for, validate, validate_metadata, validate_metadata_with_target,
+    validate_with_target,
+};
 
 #[doc(inline)]
 pub use builder::{

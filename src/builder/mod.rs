@@ -188,12 +188,8 @@ pub fn build_skill(spec: &SkillSpec) -> Result<BuildResult> {
     }
 
     // 12. Validate output.
-    let messages = validate(&output_dir);
-    let errors: Vec<&str> = messages
-        .iter()
-        .filter(|m| !m.starts_with("warning: "))
-        .map(|m| m.as_str())
-        .collect();
+    let diags = validate(&output_dir);
+    let errors: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
     if !errors.is_empty() {
         // Best-effort cleanup of files we just wrote, to avoid leaving
         // invalid artifacts on disk that block subsequent runs.
@@ -204,8 +200,12 @@ pub fn build_skill(spec: &SkillSpec) -> Result<BuildResult> {
                 let _ = std::fs::remove_file(&full_path);
             }
         }
+        let error_msgs: Vec<String> = errors.iter().map(|d| d.to_string()).collect();
         return Err(AigentError::Build {
-            message: format!("generated skill failed validation:\n{}", errors.join("\n")),
+            message: format!(
+                "generated skill failed validation:\n{}",
+                error_msgs.join("\n")
+            ),
         });
     }
 
@@ -378,12 +378,8 @@ mod tests {
             ..Default::default()
         };
         build_skill(&spec).unwrap();
-        let messages = crate::validate(&dir);
-        let errors: Vec<&str> = messages
-            .iter()
-            .filter(|m| !m.starts_with("warning: "))
-            .map(|s| s.as_str())
-            .collect();
+        let diags = crate::validate(&dir);
+        let errors: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
         assert!(
             errors.is_empty(),
             "validate should report no errors: {errors:?}"

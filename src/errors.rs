@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::diagnostics::Diagnostic;
+
 /// Errors that can occur during skill operations.
 #[derive(Error, Debug)]
 pub enum AigentError {
@@ -13,8 +15,8 @@ pub enum AigentError {
     /// Skill validation found problems.
     #[error("{}", format_validation_errors(errors))]
     Validation {
-        /// List of validation error messages.
-        errors: Vec<String>,
+        /// Structured diagnostics from validation.
+        errors: Vec<Diagnostic>,
     },
 
     /// Filesystem I/O error.
@@ -36,12 +38,12 @@ pub enum AigentError {
 /// Format validation errors for display.
 ///
 /// - Empty list → `"Validation failed: no details"`
-/// - Single error → the error message itself
+/// - Single error → the error message itself (via `Display` impl)
 /// - Multiple errors → bullet list prefixed with `"Validation failed:"`
-fn format_validation_errors(errors: &[String]) -> String {
+fn format_validation_errors(errors: &[Diagnostic]) -> String {
     match errors.len() {
         0 => "Validation failed: no details".to_string(),
-        1 => errors[0].clone(),
+        1 => errors[0].to_string(),
         _ => {
             let bullets: String = errors.iter().map(|e| format!("\n  - {e}")).collect();
             format!("Validation failed:{bullets}")
@@ -55,6 +57,12 @@ pub type Result<T> = std::result::Result<T, AigentError>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics::{Severity, E001, E002};
+
+    /// Helper to create a Diagnostic from severity, code, and message.
+    fn diag(severity: Severity, code: &'static str, msg: &str) -> Diagnostic {
+        Diagnostic::new(severity, code, msg)
+    }
 
     #[test]
     fn parse_display() {
@@ -67,7 +75,7 @@ mod tests {
     #[test]
     fn validation_single_error_display() {
         let err = AigentError::Validation {
-            errors: vec!["name too long".to_string()],
+            errors: vec![diag(Severity::Error, E001, "name too long")],
         };
         assert_eq!(err.to_string(), "name too long");
     }
@@ -75,7 +83,10 @@ mod tests {
     #[test]
     fn validation_multiple_errors_display() {
         let err = AigentError::Validation {
-            errors: vec!["bad name".to_string(), "too long".to_string()],
+            errors: vec![
+                diag(Severity::Error, E001, "bad name"),
+                diag(Severity::Error, E002, "too long"),
+            ],
         };
         assert_eq!(
             err.to_string(),
@@ -122,13 +133,17 @@ mod tests {
     #[test]
     fn validation_errors_accessible_via_match() {
         let err = AigentError::Validation {
-            errors: vec!["err1".to_string(), "err2".to_string(), "err3".to_string()],
+            errors: vec![
+                diag(Severity::Error, E001, "err1"),
+                diag(Severity::Error, E001, "err2"),
+                diag(Severity::Error, E001, "err3"),
+            ],
         };
         match err {
             AigentError::Validation { errors } => {
                 assert_eq!(errors.len(), 3);
-                assert_eq!(errors[0], "err1");
-                assert_eq!(errors[2], "err3");
+                assert_eq!(errors[0].message, "err1");
+                assert_eq!(errors[2].message, "err3");
             }
             _ => panic!("expected Validation variant"),
         }
