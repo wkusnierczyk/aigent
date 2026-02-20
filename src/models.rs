@@ -155,20 +155,20 @@ metadata:
     }
 
     #[test]
-    fn field_accessors_name_and_description() {
+    fn field_access_name_and_description() {
         let sp = minimal_props();
         assert_eq!(sp.name, "foo");
         assert_eq!(sp.description, "bar");
     }
 
     #[test]
-    fn field_accessor_allowed_tools() {
+    fn field_access_allowed_tools() {
         let sp = full_props();
         assert_eq!(sp.allowed_tools.as_deref(), Some("Bash, Read"));
     }
 
     #[test]
-    fn field_accessor_metadata() {
+    fn field_access_metadata() {
         let sp = full_props();
         let meta = sp.metadata.as_ref().unwrap();
         assert_eq!(
