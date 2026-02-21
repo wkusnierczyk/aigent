@@ -10,6 +10,9 @@ use crate::errors::{AigentError, Result};
 use crate::fs_util::{is_regular_dir, is_regular_file};
 use crate::parser::{find_skill_md, read_properties};
 
+/// Maximum recursion depth for directory operations.
+const MAX_RECURSION_DEPTH: usize = 10;
+
 /// Assembled skill metadata collected during plugin assembly.
 #[derive(Debug)]
 pub struct AssembleWarning {
@@ -209,14 +212,23 @@ fn copy_skill_files(src: &Path, dest: &Path) -> Result<()> {
         if is_regular_file(&src_path) {
             std::fs::copy(&src_path, &dest_path)?;
         } else if is_regular_dir(&src_path) {
-            copy_dir_recursive(&src_path, &dest_path)?;
+            copy_dir_recursive(&src_path, &dest_path, 0)?;
         }
     }
     Ok(())
 }
 
 /// Recursively copy a directory.
-fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
+///
+/// # Errors
+///
+/// Returns an error if the recursion depth exceeds [`MAX_RECURSION_DEPTH`].
+fn copy_dir_recursive(src: &Path, dest: &Path, depth: usize) -> Result<()> {
+    if depth > MAX_RECURSION_DEPTH {
+        return Err(AigentError::Build {
+            message: format!("exceeded maximum directory depth ({MAX_RECURSION_DEPTH})"),
+        });
+    }
     std::fs::create_dir_all(dest)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
@@ -226,7 +238,7 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
         if is_regular_file(&src_path) {
             std::fs::copy(&src_path, &dest_path)?;
         } else if is_regular_dir(&src_path) {
-            copy_dir_recursive(&src_path, &dest_path)?;
+            copy_dir_recursive(&src_path, &dest_path, depth + 1)?;
         }
     }
     Ok(())
@@ -469,5 +481,71 @@ mod tests {
         assert!(is_unsafe_name(""));
         assert!(!is_unsafe_name("my-skill"));
         assert!(!is_unsafe_name("skill_with_underscores"));
+    }
+
+    #[test]
+    fn copy_dir_recursive_normal_depth() {
+        let tmp = tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let dest = tmp.path().join("dest");
+
+        // Create a few levels of nesting (well under the limit).
+        let mut current = src.clone();
+        for i in 0..5 {
+            current = current.join(format!("level-{i}"));
+            fs::create_dir_all(&current).unwrap();
+            fs::write(current.join("file.txt"), format!("level {i}")).unwrap();
+        }
+
+        copy_dir_recursive(&src, &dest, 0).unwrap();
+
+        // Verify deepest file was copied.
+        let mut check = dest.clone();
+        for i in 0..5 {
+            check = check.join(format!("level-{i}"));
+        }
+        assert!(check.join("file.txt").exists());
+    }
+
+    #[test]
+    fn copy_dir_recursive_exceeds_depth_limit() {
+        let tmp = tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let dest = tmp.path().join("dest");
+
+        // Create nesting deeper than MAX_RECURSION_DEPTH.
+        let mut current = src.clone();
+        for i in 0..15 {
+            current = current.join(format!("level-{i}"));
+            fs::create_dir_all(&current).unwrap();
+        }
+
+        let result = copy_dir_recursive(&src, &dest, 0);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("exceeded maximum directory depth"),
+            "expected depth error, got: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn copy_dir_recursive_error_message_contains_limit() {
+        let tmp = tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let dest = tmp.path().join("dest");
+
+        let mut current = src.clone();
+        for i in 0..15 {
+            current = current.join(format!("level-{i}"));
+            fs::create_dir_all(&current).unwrap();
+        }
+
+        let result = copy_dir_recursive(&src, &dest, 0);
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains(&MAX_RECURSION_DEPTH.to_string()),
+            "error should contain the depth limit value, got: {err_msg}"
+        );
     }
 }

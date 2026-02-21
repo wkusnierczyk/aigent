@@ -393,21 +393,31 @@ pub fn validate_with_target(dir: &Path, target: ValidationTarget) -> Vec<Diagnos
     diags
 }
 
+/// Maximum recursion depth for skill discovery.
+const MAX_DISCOVERY_DEPTH: usize = 10;
+
 /// Discover all skill directories under a root path.
 ///
 /// Walks the directory tree recursively, finding all `SKILL.md` or
 /// `skill.md` files. Returns the parent directory of each found file.
-/// Skips hidden directories (names starting with `.`).
+/// Skips hidden directories (names starting with `.`) and stops
+/// recursing beyond [`MAX_DISCOVERY_DEPTH`] levels.
 #[must_use]
 pub fn discover_skills(root: &Path) -> Vec<std::path::PathBuf> {
     let mut dirs = Vec::new();
-    discover_skills_recursive(root, &mut dirs);
+    discover_skills_recursive(root, &mut dirs, 0);
     dirs.sort();
     dirs
 }
 
 /// Recursive helper for `discover_skills`.
-fn discover_skills_recursive(dir: &Path, results: &mut Vec<std::path::PathBuf>) {
+///
+/// Stops recursing when `depth` exceeds [`MAX_DISCOVERY_DEPTH`].
+fn discover_skills_recursive(dir: &Path, results: &mut Vec<std::path::PathBuf>, depth: usize) {
+    if depth > MAX_DISCOVERY_DEPTH {
+        return;
+    }
+
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return,
@@ -433,7 +443,7 @@ fn discover_skills_recursive(dir: &Path, results: &mut Vec<std::path::PathBuf>) 
     }
 
     for subdir in subdirs {
-        discover_skills_recursive(&subdir, results);
+        discover_skills_recursive(&subdir, results, depth + 1);
     }
 }
 
@@ -445,7 +455,7 @@ fn discover_skills_recursive(dir: &Path, results: &mut Vec<std::path::PathBuf>) 
 pub fn discover_skills_verbose(root: &Path) -> (Vec<std::path::PathBuf>, Vec<DiscoveryWarning>) {
     let mut skills = Vec::new();
     let mut warnings = Vec::new();
-    discover_skills_recursive_verbose(root, &mut skills, &mut warnings);
+    discover_skills_recursive_verbose(root, &mut skills, &mut warnings, 0);
     skills.sort();
     (skills, warnings)
 }
@@ -455,7 +465,11 @@ fn discover_skills_recursive_verbose(
     dir: &Path,
     results: &mut Vec<std::path::PathBuf>,
     warnings: &mut Vec<DiscoveryWarning>,
+    depth: usize,
 ) {
+    if depth > MAX_DISCOVERY_DEPTH {
+        return;
+    }
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(e) => {
@@ -497,7 +511,7 @@ fn discover_skills_recursive_verbose(
     }
 
     for subdir in subdirs {
-        discover_skills_recursive_verbose(&subdir, results, warnings);
+        discover_skills_recursive_verbose(&subdir, results, warnings, depth + 1);
     }
 }
 
@@ -1153,5 +1167,42 @@ mod tests {
         let original = discover_skills(parent.path());
         let (verbose, _) = discover_skills_verbose(parent.path());
         assert_eq!(original, verbose, "verbose variant should match original");
+    }
+
+    // ── discover_skills depth tests ──────────────────────────────────
+
+    #[test]
+    fn discover_skills_normal_depth() {
+        let parent = tempdir().unwrap();
+        // Place a skill at depth 5 (well under the limit).
+        let mut current = parent.path().to_path_buf();
+        for i in 0..5 {
+            current = current.join(format!("level-{i}"));
+            fs::create_dir(&current).unwrap();
+        }
+        fs::write(current.join("SKILL.md"), "---\nname: deep\n---\n").unwrap();
+        let dirs = discover_skills(parent.path());
+        assert_eq!(dirs.len(), 1);
+        assert_eq!(dirs[0], current);
+    }
+
+    #[test]
+    fn discover_skills_stops_at_max_depth() {
+        let parent = tempdir().unwrap();
+        // Create nesting deeper than MAX_DISCOVERY_DEPTH and place a skill
+        // beyond the limit. Discovery should not crash and should not find it.
+        let mut current = parent.path().to_path_buf();
+        for i in 0..15 {
+            current = current.join(format!("level-{i}"));
+            fs::create_dir(&current).unwrap();
+        }
+        fs::write(current.join("SKILL.md"), "---\nname: too-deep\n---\n").unwrap();
+        let dirs = discover_skills(parent.path());
+        // The skill is at depth 15, beyond MAX_DISCOVERY_DEPTH (10),
+        // so it should not be discovered.
+        assert!(
+            dirs.is_empty(),
+            "skill beyond max depth should not be found, got: {dirs:?}"
+        );
     }
 }
