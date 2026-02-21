@@ -35,6 +35,8 @@ pub mod errors;
 pub mod fixer;
 /// SKILL.md formatting: canonical key ordering and markdown cleanup.
 pub mod formatter;
+/// Symlink-safe filesystem helpers.
+pub(crate) mod fs_util;
 /// Semantic lint checks for skill quality improvement.
 pub mod linter;
 /// Data model for SKILL.md frontmatter properties.

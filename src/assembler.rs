@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::errors::{AigentError, Result};
+use crate::fs_util::{is_regular_dir, is_regular_file};
 use crate::parser::{find_skill_md, read_properties};
 
 /// Assembled skill metadata collected during plugin assembly.
@@ -205,9 +206,9 @@ fn copy_skill_files(src: &Path, dest: &Path) -> Result<()> {
         let src_path = entry.path();
         let dest_path = dest.join(&name);
 
-        if src_path.is_file() {
+        if is_regular_file(&src_path) {
             std::fs::copy(&src_path, &dest_path)?;
-        } else if src_path.is_dir() {
+        } else if is_regular_dir(&src_path) {
             copy_dir_recursive(&src_path, &dest_path)?;
         }
     }
@@ -222,9 +223,9 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
         let src_path = entry.path();
         let dest_path = dest.join(entry.file_name());
 
-        if src_path.is_file() {
+        if is_regular_file(&src_path) {
             std::fs::copy(&src_path, &dest_path)?;
-        } else if src_path.is_dir() {
+        } else if is_regular_dir(&src_path) {
             copy_dir_recursive(&src_path, &dest_path)?;
         }
     }

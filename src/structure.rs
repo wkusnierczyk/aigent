@@ -4,15 +4,17 @@
 //! structure: file references in the markdown body, script permissions,
 //! reference depth, and nesting depth.
 //!
-//! Structure diagnostics use codes S001–S004 and are `Severity::Warning`
-//! unless the issue would cause a broken skill at runtime.
+//! Structure diagnostics use codes S001–S005. Most are `Severity::Warning`
+//! unless the issue would cause a broken skill at runtime. S005 (symlink
+//! detected) uses `Severity::Info`.
 
 use std::path::Path;
 use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::diagnostics::{Diagnostic, Severity, S001, S003, S004};
+use crate::diagnostics::{Diagnostic, Severity, S001, S003, S004, S005};
+use crate::fs_util::{is_regular_dir, is_regular_file, is_symlink};
 
 #[cfg(unix)]
 use crate::diagnostics::S002;
@@ -38,6 +40,7 @@ static LINK_RE: LazyLock<Regex> = LazyLock::new(|| {
 /// - S002: Scripts (.sh) have execute permission (Unix only)
 /// - S003: File references exceed 1 level of depth
 /// - S004: Excessive directory nesting depth
+/// - S005: Symlink detected in skill directory (Info)
 ///
 /// # Arguments
 ///
@@ -61,6 +64,9 @@ pub fn validate_structure(dir: &Path) -> Vec<Diagnostic> {
 
     // S004: Check directory nesting depth.
     diags.extend(check_nesting_depth(dir));
+
+    // S005: Check for symlinks.
+    diags.extend(check_symlinks(dir));
 
     diags
 }
@@ -145,7 +151,7 @@ fn check_script_permissions_impl(dir: &Path) -> Vec<Diagnostic> {
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_file() {
+        if is_regular_file(&path) {
             if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                 if ext.eq_ignore_ascii_case("sh") {
                     if let Ok(metadata) = std::fs::metadata(&path) {
@@ -217,7 +223,7 @@ fn check_nesting_recursive(root: &Path, current: &Path, depth: usize, diags: &mu
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
+        if is_regular_dir(&path) {
             // Skip hidden directories.
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                 if name.starts_with('.') {
@@ -225,6 +231,56 @@ fn check_nesting_recursive(root: &Path, current: &Path, depth: usize, diags: &mu
                 }
             }
             check_nesting_recursive(root, &path, depth + 1, diags);
+        }
+    }
+}
+
+/// S005: Check for symlinks in the skill directory.
+///
+/// Walks the directory entries and reports any symlinks found. Symlinks are
+/// an informational finding (not an error) because they can be used to escape
+/// the skill directory boundary.
+fn check_symlinks(dir: &Path) -> Vec<Diagnostic> {
+    let mut diags = Vec::new();
+    check_symlinks_recursive(dir, dir, &mut diags);
+    diags
+}
+
+/// Recursive helper for symlink detection.
+fn check_symlinks_recursive(root: &Path, current: &Path, diags: &mut Vec<Diagnostic>) {
+    let entries = match std::fs::read_dir(current) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+
+        // Skip hidden entries.
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if name.starts_with('.') {
+                continue;
+            }
+        }
+
+        if is_symlink(&path) {
+            let relative = path
+                .strip_prefix(root)
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| path.display().to_string());
+            diags.push(
+                Diagnostic::new(
+                    Severity::Info,
+                    S005,
+                    format!("symlink detected: '{relative}'"),
+                )
+                .with_field("structure")
+                .with_suggestion(
+                    "Remove symlinks from skill directories to prevent directory escape",
+                ),
+            );
+        } else if is_regular_dir(&path) {
+            check_symlinks_recursive(root, &path, diags);
         }
     }
 }
@@ -443,6 +499,58 @@ mod tests {
         assert!(
             !diags.iter().any(|d| d.code == S004),
             "hidden directories should be skipped, got: {diags:?}",
+        );
+    }
+
+    // ── S005: Symlink detected ───────────────────────────────────────
+
+    #[cfg(unix)]
+    #[test]
+    fn s005_symlink_detected() {
+        let (_parent, dir) =
+            make_skill("my-skill", "---\nname: my-skill\ndescription: desc\n---\n");
+        // Create a regular file and a symlink to it inside the skill dir.
+        let target = dir.join("real.txt");
+        fs::write(&target, "content").unwrap();
+        let link = dir.join("link.txt");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        let diags = validate_structure(&dir);
+        assert!(
+            diags.iter().any(|d| d.code == S005),
+            "expected S005 for symlink, got: {diags:?}",
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn s005_symlink_is_info_severity() {
+        let (_parent, dir) =
+            make_skill("my-skill", "---\nname: my-skill\ndescription: desc\n---\n");
+        let target = dir.join("real.txt");
+        fs::write(&target, "content").unwrap();
+        let link = dir.join("link.txt");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        let diags = validate_structure(&dir);
+        let s005_diags: Vec<_> = diags.iter().filter(|d| d.code == S005).collect();
+        assert!(!s005_diags.is_empty(), "expected S005 diagnostic",);
+        assert!(
+            s005_diags.iter().all(|d| d.is_info()),
+            "S005 should be Info severity, got: {s005_diags:?}",
+        );
+    }
+
+    #[test]
+    fn s005_no_symlinks_no_diagnostic() {
+        let (_parent, dir) =
+            make_skill("my-skill", "---\nname: my-skill\ndescription: desc\n---\n");
+        fs::write(dir.join("regular.txt"), "content").unwrap();
+
+        let diags = validate_structure(&dir);
+        assert!(
+            !diags.iter().any(|d| d.code == S005),
+            "expected no S005 for regular files, got: {diags:?}",
         );
     }
 
