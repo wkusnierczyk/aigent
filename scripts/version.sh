@@ -84,17 +84,36 @@ cmd_set() {
         echo "Warning: $PLUGIN_JSON not found" >&2
     fi
 
-    # 3. README.md — update --about block version
+    # 3. README.md — rebuild --about block from actual binary output
     if [[ -f "$README" ]]; then
-        if grep -q "├─ version:    $VERSION" "$README"; then
-            echo "README.md: already $VERSION"
-        elif grep -q "├─ version:" "$README"; then
-            sedi "s/├─ version:    .*/├─ version:    $VERSION/" "$README"
-            echo "Updated README.md --about block: $VERSION"
+        echo "Building binary for --about output..."
+        (cd "$ROOT" && cargo build --quiet 2>/dev/null)
+        local ABOUT_FILE
+        ABOUT_FILE="$(mktemp)"
+        "$ROOT/target/debug/aigent" --about > "$ABOUT_FILE" 2>/dev/null
+        if [[ -s "$ABOUT_FILE" ]]; then
+            # Replace the code block under "## About and Licence":
+            # print everything, but skip lines inside the ``` block
+            # and insert the fresh --about output instead.
+            local TMPFILE
+            TMPFILE="$(mktemp)"
+            awk -v aboutfile="$ABOUT_FILE" '
+                /^## About and Licence/ { in_section=1; print; next }
+                in_section && /^```$/ && !in_block { in_block=1; print; next }
+                in_section && in_block && /^```$/ {
+                    while ((getline line < aboutfile) > 0) print line
+                    print; in_section=0; in_block=0; next
+                }
+                in_section && in_block { next }
+                { print }
+            ' "$README" > "$TMPFILE"
+            mv "$TMPFILE" "$README"
+            echo "Updated README.md --about block from binary output"
             CHANGED=1
         else
-            echo "Warning: --about version line not found in README.md" >&2
+            echo "Warning: aigent --about produced no output" >&2
         fi
+        rm -f "$ABOUT_FILE"
     else
         echo "Warning: $README not found" >&2
     fi
