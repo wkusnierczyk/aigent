@@ -401,7 +401,7 @@ const MAX_DISCOVERY_DEPTH: usize = 10;
 /// Walks the directory tree recursively, finding all `SKILL.md` or
 /// `skill.md` files. Returns the parent directory of each found file.
 /// Skips hidden directories (names starting with `.`) and stops
-/// recursing beyond [`MAX_DISCOVERY_DEPTH`] levels.
+/// recursing beyond 10 levels of nesting.
 #[must_use]
 pub fn discover_skills(root: &Path) -> Vec<std::path::PathBuf> {
     let mut dirs = Vec::new();
