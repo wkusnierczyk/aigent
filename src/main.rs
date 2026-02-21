@@ -213,6 +213,18 @@ enum Commands {
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
     },
+    /// Format SKILL.md files (canonical key order, clean whitespace)
+    #[command(alias = "format")]
+    Fmt {
+        /// Paths to skill directories or SKILL.md files
+        skill_dirs: Vec<PathBuf>,
+        /// Check formatting without modifying files (exit 1 if unformatted)
+        #[arg(long)]
+        check: bool,
+        /// Discover skills recursively
+        #[arg(long)]
+        recursive: bool,
+    },
     /// Initialize a skill directory with a template SKILL.md
     Init {
         /// Target directory
@@ -744,6 +756,52 @@ fn main() {
                     eprintln!("aigent upgrade: {e}");
                     std::process::exit(1);
                 }
+            }
+        }
+        Some(Commands::Fmt {
+            skill_dirs,
+            check,
+            recursive,
+        }) => {
+            let dirs = resolve_dirs(&skill_dirs, recursive);
+            if dirs.is_empty() {
+                if recursive {
+                    eprintln!("No SKILL.md files found under the specified path(s).");
+                } else {
+                    eprintln!("Usage: aigent fmt <skill-dir> [<skill-dir>...]");
+                }
+                std::process::exit(1);
+            }
+
+            let mut any_changed = false;
+            for dir in &dirs {
+                match aigent::format_skill(dir) {
+                    Ok(result) => {
+                        if result.changed {
+                            any_changed = true;
+                            if check {
+                                eprintln!("Would reformat: {}", dir.display());
+                            } else {
+                                let path = aigent::find_skill_md(dir).unwrap();
+                                std::fs::write(&path, &result.content).unwrap_or_else(|e| {
+                                    eprintln!(
+                                        "aigent fmt: failed to write {}: {e}",
+                                        path.display()
+                                    );
+                                    std::process::exit(1);
+                                });
+                                eprintln!("Formatted {}", dir.display());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("aigent fmt: {}: {e}", dir.display());
+                    }
+                }
+            }
+
+            if check && any_changed {
+                std::process::exit(1);
             }
         }
         Some(Commands::Init { dir, template }) => {

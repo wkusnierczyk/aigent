@@ -1513,6 +1513,112 @@ fn lint_alias_maps_to_check() {
         .stderr(predicate::str::contains("info:"));
 }
 
+// ── M13: fmt subcommand (#76) ────────────────────────────────────
+
+#[test]
+fn fmt_already_formatted_no_change() {
+    // Keys are already in canonical order.
+    let (_parent, dir) = make_skill_dir(
+        "formatted-skill",
+        "---\nname: formatted-skill\ndescription: Does things\ncompatibility: claude-code\nmetadata:\n  version: '1.0'\n---\nBody.\n",
+    );
+    aigent()
+        .args(["fmt", dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Formatted").not());
+}
+
+#[test]
+fn fmt_reorders_keys() {
+    // metadata before name — should be reordered.
+    let (_parent, dir) = make_skill_dir(
+        "unformatted-skill",
+        "---\nmetadata:\n  version: '1.0'\nname: unformatted-skill\ndescription: Does things\n---\nBody.\n",
+    );
+    aigent()
+        .args(["fmt", dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Formatted"));
+    // Verify the file was reordered.
+    let content = fs::read_to_string(dir.join("SKILL.md")).unwrap();
+    let name_pos = content.find("name:").unwrap();
+    let meta_pos = content.find("metadata:").unwrap();
+    assert!(
+        name_pos < meta_pos,
+        "name should come before metadata after fmt"
+    );
+}
+
+#[test]
+fn fmt_check_unformatted_exits_nonzero() {
+    let (_parent, dir) = make_skill_dir(
+        "check-skill",
+        "---\nmetadata:\n  version: '1.0'\nname: check-skill\ndescription: Does things\n---\nBody.\n",
+    );
+    aigent()
+        .args(["fmt", dir.to_str().unwrap(), "--check"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Would reformat"));
+    // File should NOT have been modified.
+    let content = fs::read_to_string(dir.join("SKILL.md")).unwrap();
+    assert!(
+        content.starts_with("---\nmetadata:"),
+        "file should be unchanged in --check mode"
+    );
+}
+
+#[test]
+fn fmt_check_formatted_exits_zero() {
+    let (_parent, dir) = make_skill_dir(
+        "clean-skill",
+        "---\nname: clean-skill\ndescription: Does things\n---\nBody.\n",
+    );
+    aigent()
+        .args(["fmt", dir.to_str().unwrap(), "--check"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn fmt_preserves_values_after_reorder() {
+    let (_parent, dir) = make_skill_dir(
+        "preserve-test",
+        "---\ncompatibility: claude-code\nname: preserve-test\ndescription: >-\n  A multiline description\n  that spans two lines\nmetadata:\n  version: '1.0'\n  author: test\n---\n# Body\n\nParagraph.\n",
+    );
+    aigent()
+        .args(["fmt", dir.to_str().unwrap()])
+        .assert()
+        .success();
+    let content = fs::read_to_string(dir.join("SKILL.md")).unwrap();
+    // All values should be preserved.
+    assert!(content.contains("name: preserve-test"));
+    assert!(content.contains("A multiline description"));
+    assert!(content.contains("compatibility: claude-code"));
+    assert!(content.contains("version: '1.0'"));
+    assert!(content.contains("# Body"));
+    // Should still be valid.
+    aigent()
+        .args(["validate", dir.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[test]
+fn format_alias_works() {
+    let (_parent, dir) = make_skill_dir(
+        "alias-test",
+        "---\nname: alias-test\ndescription: Does things\n---\nBody.\n",
+    );
+    // `format` is an alias for `fmt`.
+    aigent()
+        .args(["format", dir.to_str().unwrap(), "--check"])
+        .assert()
+        .success();
+}
+
 // ── M12: watch mode (no-feature build) ───────────────────────────
 
 #[test]
