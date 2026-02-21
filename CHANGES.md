@@ -1,5 +1,40 @@
 # Changes
 
+## [0.4.0] — 2026-02-21
+
+### Breaking
+
+- `read_body()` now returns `Result<String>` instead of `String`, propagating
+  IO and parse errors instead of silently returning an empty string (#88)
+
+### Added
+
+- Symlink safety: new `fs_util` module with `is_regular_file()`,
+  `is_regular_dir()`, `is_symlink()` helpers; all file-system walks use
+  symlink-safe checks; `S005` diagnostic for symlinks in skill dirs (#87)
+- Path traversal guard: `S006` diagnostic rejects `..` components in
+  reference links (#89)
+- File size cap: `read_file_checked()` helper rejects files exceeding
+  1 MiB, preventing memory exhaustion (#90)
+- Discovery error collection: `discover_skills_verbose()` and
+  `collect_skills_verbose()` collect warnings instead of silently
+  skipping unreadable paths; CLI commands print warnings to stderr (#91, #92)
+- CRLF normalization in formatter: `format_content()` normalizes `\r\n`
+  to `\n` before byte-offset arithmetic (#94)
+- Recursion depth limits (10 levels) in `copy_dir_recursive` and
+  `discover_skills_recursive` to prevent stack overflow (#96)
+- Pre-tokenized Jaccard similarity in conflict detection eliminates
+  per-pair allocation in the O(n²) loop (#95)
+- Formatter comment anchoring: standalone YAML comments stay in position
+  during key reordering instead of traveling with the preceding key (#103)
+- Unified `scripts/version.sh` with `show`, `set`, and `bump` subcommands,
+  replacing `scripts/bump-version.sh` (#102)
+
+### Fixed
+
+- TOCTOU race in `build_skill()` and `init_skill()`: replaced
+  check-then-write with atomic `create_new(true)` (#93)
+
 ## [0.3.0] — 2026-02-21
 
 ### Breaking
