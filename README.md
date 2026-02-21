@@ -1000,6 +1000,8 @@ time via `env!("CARGO_PKG_VERSION")`.
 
 ### Milestones
 
+**Status:** Implementation complete (M1–M13). In review.
+
 Project tracked at
 [github.com/users/wkusnierczyk/projects/39](https://github.com/users/wkusnierczyk/projects/39).
 
