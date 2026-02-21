@@ -18,7 +18,7 @@
 - [Library Usage](#library-usage)
 - [SKILL.md Format](#skillmd-format)
 - [Builder Modes](#builder-modes)
-- [Specification Compliance](#specification-compliance)
+- [Compliance](#compliance)
 - [CLI Reference](#cli-reference)
 - [API Reference](#api-reference)
 - [Claude Code Plugin](#claude-code-plugin)
@@ -232,7 +232,9 @@ OpenAI-compatible endpoints (vLLM, LM Studio, etc.) are supported via
 
 Use `--no-llm` to force deterministic mode regardless of available providers.
 
-## Specification Compliance
+## Compliance
+
+### Specification Coverage
 
 Three-way comparison of the
 [Anthropic agent skill specification](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices),
@@ -263,6 +265,29 @@ aigent, and the
 aigent implements **all** rules from the specification, plus additional checks
 (Unicode NFKC normalization, path canonicalization, post-build validation) that
 go beyond both the specification and the reference implementation.
+
+### aigent vs. plugin-dev
+
+Anthropic's **plugin-dev** plugin (bundled with Claude Code) and **aigent**
+are complementary tools for skill development:
+
+| | **aigent** | **plugin-dev** |
+|---|---|---|
+| **What** | Rust CLI + library | Claude Code plugin (LLM-guided) |
+| **Scope** | Deep: SKILL.md toolchain | Broad: entire plugin ecosystem |
+| **Validation** | Deterministic — typed diagnostics, error codes, JSON output | Heuristic — agent-based review |
+| **Scoring** | Weighted 0–100 with CI gating | Not available |
+| **Formatting** | `aigent fmt` — idempotent, `--check` for CI | Not available |
+| **Testing** | Fixture-based (`tests.yml`) + single-query probe | General guidance only |
+| **Assembly** | `aigent build` — reproducible, scriptable | `/create-plugin` — guided, interactive |
+| **Ecosystem** | Skills only | Skills + commands + agents + hooks + MCP + settings |
+
+aigent handles the **depth** of SKILL.md quality enforcement (validation,
+scoring, formatting, testing, assembly). plugin-dev covers the **breadth**
+of the Claude Code plugin ecosystem (7 component types, ~21,000 words of
+guidance). Use plugin-dev to learn patterns; use aigent to enforce them.
+
+For the full analysis, see [dev/plugin-dev.md](dev/plugin-dev.md).
 
 ### Extras
 
@@ -1020,6 +1045,7 @@ Project tracked at
 | M11 | Builder and Prompt Enhancements | ✅ |
 | M12 | Ecosystem and Workflow | ✅ |
 | M13 | Enhancements | ✅ |
+| M14 | SRE Review | 🔲 |
 
 ## CI/CD and Release Workflows
 

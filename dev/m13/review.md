@@ -1155,3 +1155,32 @@ changes. Verification passes (476 tests, clean clippy/fmt/doc).
 | Findings | 10 (0 high, 4 medium, 6 low) |
 | Plan deviations | 2 (alias naming, scoring formula) |
 | Verification | All 4 checks pass |
+
+---
+
+## Code Review Findings (m13)
+
+Date: 2026-02-21
+
+1. High: Path traversal via untrusted skill name during `build`
+- `src/assembler.rs:98` joins `skills_dir` with `name` from frontmatter without sanitization.
+- A crafted skill name like `../../outside` can cause writes outside `<output>/skills` when `create_dir_all`, `copy`, and recursive copy run.
+- `src/assembler.rs:115` repeats the same unsafe join during optional validation.
+
+2. High: `plugin.json` can be malformed (manual JSON string interpolation)
+- `src/assembler.rs:190` and `src/assembler.rs:196` construct JSON via `format!` and inject raw `name` and skill names directly.
+- Names containing `"`, `\`, or control characters will produce invalid JSON; data is not escaped.
+- This should use `serde_json` serialization from a typed struct/value.
+
+3. Medium: `aigent test --generate` returns success even when generation fails
+- `src/main.rs:787` to `src/main.rs:810` logs generation errors per dir, then returns without setting a failing exit code.
+- CI/scripts can falsely pass even though some fixtures were not generated.
+
+4. Medium: `aigent fmt` suppresses operation failures in exit status
+- `src/main.rs:932` logs per-directory format errors but does not track them.
+- Command exits 0 unless `--check` and files are changed (`src/main.rs:938`), so parse/read failures can be silently non-fatal in automation.
+
+5. Medium: Generated `tests.yml` can be syntactically invalid for quoted inputs
+- `src/test_runner.rs:156` to `src/test_runner.rs:168` inserts `{positive}` directly inside double quotes.
+- If description text contains `"`, newline, or YAML-special characters, generated fixture can fail to parse.
+- Should quote/escape via serializer (or emit block scalar safely).
