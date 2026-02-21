@@ -220,6 +220,141 @@ into CI/CD pipelines.
    schemas, testing hooks, and validating agent files. aigent has no tooling
    for non-skill components.
 
+## aigent as a Claude Code Plugin
+
+aigent is not only a CLI — it ships as a Claude Code plugin (since M9). When
+installed, Claude Code gains access to the same deterministic tooling through
+the same platform as plugin-dev:
+
+| Component | File | What It Does |
+|-----------|------|--------------|
+| Manifest | `.claude-plugin/plugin.json` | Registers aigent as a Claude Code plugin |
+| `aigent-validator` skill | `skills/aigent-validator/SKILL.md` | Teaches Claude to validate via `aigent validate` |
+| `aigent-scorer` skill | `skills/aigent-scorer/SKILL.md` | Teaches Claude to score via `aigent score` |
+| `aigent-builder` skill | `skills/aigent-builder/SKILL.md` | Teaches Claude to create via `aigent new` |
+| PostToolUse hook | `hooks/hooks.json` | Auto-validates SKILL.md on every Write/Edit |
+
+When both plugins are installed, Claude Code has plugin-dev's guidance skills
+*and* aigent's CLI-backed skills. The hook gives aigent continuous automated
+validation without the user asking — something plugin-dev's LLM-driven agents
+cannot do.
+
+Each aigent skill includes a "Without aigent CLI" fallback that teaches Claude
+the rules directly, so the skills remain useful even if the `aigent` binary
+is not on `$PATH`.
+
+## Mechanizable Rules in plugin-dev
+
+plugin-dev encodes concrete validation rules in its agent system prompts and
+bash utility scripts. These rules are fully deterministic and could be
+enforced mechanically by a CLI tool — the same value-add aigent already
+provides for SKILL.md validation.
+
+### Agent Validation Rules (from `validate-agent.sh`)
+
+| Rule | Check |
+|------|-------|
+| Frontmatter present | File starts and ends with `---` |
+| Required fields | `name`, `description`, `model`, `color` all present |
+| Name format | Kebab-case, 3–50 chars, not generic ("helper", "assistant", "agent", "tool") |
+| Description length | 10–5000 characters |
+| Description content | Includes `<example>` blocks, starts with "Use this agent when" |
+| Model value | One of: `inherit`, `sonnet`, `opus`, `haiku` |
+| Color value | One of: `blue`, `cyan`, `green`, `yellow`, `magenta`, `red` |
+| System prompt length | >20 chars (error if empty), <10k chars (warning) |
+| System prompt style | Uses second person ("You are…", "Your…") |
+
+### Hook Validation Rules (from `validate-hook-schema.sh`)
+
+| Rule | Check |
+|------|-------|
+| JSON syntax | Valid JSON |
+| Event names | One of 9 types: PreToolUse, PostToolUse, Stop, SubagentStop, SessionStart, SessionEnd, UserPromptSubmit, PreCompact, Notification |
+| Hook structure | Each event has array of objects with `matcher` + `hooks` |
+| Hook type | Each hook has `type` field: `command` or `prompt` |
+| Type-specific fields | Command hooks have `command`; prompt hooks have `prompt` |
+| Timeout range | Number, 5–600 seconds recommended |
+| Path hygiene | No hardcoded absolute paths; use `${CLAUDE_PLUGIN_ROOT}` |
+
+### Plugin Manifest Rules (from `plugin-validator` agent)
+
+| Rule | Check |
+|------|-------|
+| Location | `plugin.json` in `.claude-plugin/` directory |
+| JSON syntax | Valid JSON |
+| Required fields | `name` (kebab-case, no spaces) |
+| Version format | Semantic versioning when present |
+| Custom paths | Start with `./` (relative, no absolute) |
+| Security | No hardcoded credentials; MCP servers use HTTPS/WSS |
+
+### Command File Rules (from `command-development` skill)
+
+| Rule | Check |
+|------|-------|
+| File format | Markdown with optional YAML frontmatter |
+| Description length | ≤60 chars, starts with verb |
+| Model value | `sonnet`, `opus`, or `haiku` |
+| `allowed-tools` | Valid format (string or array) |
+
+### Skill Quality Rules (from `skill-reviewer` agent)
+
+| Rule | Check |
+|------|-------|
+| Description person | Third-person ("This skill should be used when…") |
+| Trigger specificity | Concrete trigger phrases, not vague |
+| Description length | 50–500 characters |
+| Body word count | 1,000–3,000 words (lean, focused) |
+| Writing style | Imperative/infinitive form, not second person |
+| Progressive disclosure | Core in SKILL.md; details in references/ |
+
+## Complementary Opportunities
+
+The rules above are currently enforced by plugin-dev in two ways:
+- **Bash scripts** (`validate-agent.sh`, `validate-hook-schema.sh`, etc.) —
+  deterministic but fragile, no structured output, no CI integration.
+- **Agent system prompts** — flexible but non-reproducible, no exit codes,
+  no JSON output.
+
+aigent could complement plugin-dev by providing deterministic CLI enforcement
+of these rules — the same relationship it already has with SKILL.md. This is
+not duplication: plugin-dev teaches the patterns, aigent enforces them.
+
+### What aigent already covers (SKILL.md depth)
+
+- Frontmatter validation (name, description, all fields)
+- Semantic linting (third-person, trigger phrases, gerund names, generic names)
+- Quality scoring (weighted 0–100)
+- Formatting (canonical key order, idempotent)
+- Fixture-based testing and single-query probing
+- Plugin assembly (`aigent build`)
+- Cross-skill conflict detection
+
+### What aigent could add
+
+| Capability | What It Does | plugin-dev Equivalent |
+|---|---|---|
+| **Agent validation** | Validate agent `.md` files: frontmatter fields, name format, model/color values, example blocks, system prompt length | `validate-agent.sh` (bash) |
+| **Hook validation** | Validate `hooks.json`: JSON syntax, event names, structure, timeout ranges, path hygiene | `validate-hook-schema.sh` (bash) |
+| **Manifest validation** | Validate `plugin.json`: required fields, version format, path conventions, credential scanning | `plugin-validator` agent (LLM) |
+| **Command validation** | Validate command `.md` files: frontmatter fields, description length, model values | `command-development` skill (guidance) |
+| **Cross-component checks** | Verify agents referenced in hooks exist, skills referenced in commands exist, orphan detection | Not available in plugin-dev |
+| **Plugin-wide scoring** | Extend the 0–100 scoring model to agents, hooks, commands — not just skills | Not available |
+| **Plugin-wide formatting** | Extend `fmt` to agent frontmatter and hooks.json | Not available |
+
+The bash scripts in plugin-dev are the clearest candidates for replacement.
+They implement specific, mechanical checks in fragile shell code.
+Reimplementing them in Rust with typed diagnostics, JSON output, and proper
+exit codes is a natural extension of what aigent already does.
+
+The agent system prompts encode higher-level quality rules (e.g., "description
+should be specific, not vague") that are harder to mechanize but partially
+tractable — similar to how aigent's linter checks for trigger phrases and
+generic names.
+
+Cross-component validation is unique to a CLI tool — no LLM-driven agent
+can reliably verify that all inter-component references resolve correctly
+across an entire plugin directory.
+
 ## Summary
 
 | Dimension | aigent | plugin-dev |
@@ -229,5 +364,6 @@ into CI/CD pipelines.
 | **Reproducibility** | Deterministic | Varies per run |
 | **CI/CD integration** | Native (exit codes, JSON, `--check`) | Not designed for CI |
 | **Learning curve** | Tool documentation | Progressive guidance |
-| **Ecosystem coverage** | Skills only | Skills + 6 other component types |
+| **Ecosystem coverage** | Skills only (agents/hooks/commands possible) | Skills + 6 other component types |
 | **Best for** | Enforcing quality at scale | Learning and creating plugins |
+| **Platform** | CLI + library + Claude Code plugin | Claude Code plugin |
