@@ -1046,6 +1046,28 @@ Project tracked at
 | M12 | Ecosystem and Workflow | ✅ |
 | M13 | Enhancements | ✅ |
 | M14 | SRE Review | 🔲 |
+| M15 | Plugin Ecosystem Validation | 🔲 |
+
+### Roadmap
+
+**M14: SRE Review** — security, reliability, and performance hardening prior
+to publication. Addresses symlink following, path traversal, uncapped file
+reads, silent error swallowing, TOCTOU races, and O(n²) conflict detection.
+10 issues ([#87](https://github.com/wkusnierczyk/aigent/issues/87)–[#96](https://github.com/wkusnierczyk/aigent/issues/96)).
+
+**M15: Plugin Ecosystem Validation** — extend aigent's deterministic
+validation from SKILL.md to the full Claude Code plugin ecosystem.
+Complements [plugin-dev](dev/plugin-dev.md) by mechanizing the rules it
+teaches through prose and LLM-driven agents:
+
+- Hook validation (`hooks.json`) — replaces plugin-dev's `validate-hook-schema.sh`
+- Agent file validation (`.md` frontmatter) — replaces plugin-dev's `validate-agent.sh`
+- Plugin manifest validation (`plugin.json`) — mechanizes `plugin-validator` agent checks
+- Command file validation (`.md` frontmatter) — first deterministic validator for commands
+- Cross-component consistency checks — unique to aigent, no plugin-dev equivalent
+
+5 issues ([#97](https://github.com/wkusnierczyk/aigent/issues/97)–[#101](https://github.com/wkusnierczyk/aigent/issues/101)).
+See [dev/plugin-dev.md](dev/plugin-dev.md) for the full analysis.
 
 ## CI/CD and Release Workflows
 
