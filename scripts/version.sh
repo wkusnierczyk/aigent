@@ -12,7 +12,9 @@
 # Files updated by set/bump:
 #   1. Cargo.toml                  — version = "x.y.z"
 #   2. .claude-plugin/plugin.json  — "version": "x.y.z"
-#   3. Cargo.lock                  — regenerated via cargo check
+#   3. README.md                   — --about block version line
+#   4. CHANGES.md                  — stub entry for new version
+#   5. Cargo.lock                  — regenerated via cargo check
 
 set -euo pipefail
 
@@ -21,6 +23,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 CARGO_TOML="$ROOT/Cargo.toml"
 PLUGIN_JSON="$ROOT/.claude-plugin/plugin.json"
+README="$ROOT/README.md"
+CHANGES="$ROOT/CHANGES.md"
 
 # Portable in-place sed: BSD (macOS) requires -i '', GNU (Linux) requires -i alone.
 sedi() {
@@ -80,7 +84,40 @@ cmd_set() {
         echo "Warning: $PLUGIN_JSON not found" >&2
     fi
 
-    # 3. Cargo.lock — regenerate
+    # 3. README.md — update --about block version
+    if [[ -f "$README" ]]; then
+        if grep -q "├─ version:    $VERSION" "$README"; then
+            echo "README.md: already $VERSION"
+        elif grep -q "├─ version:" "$README"; then
+            sedi "s/├─ version:    .*/├─ version:    $VERSION/" "$README"
+            echo "Updated README.md --about block: $VERSION"
+            CHANGED=1
+        else
+            echo "Warning: --about version line not found in README.md" >&2
+        fi
+    else
+        echo "Warning: $README not found" >&2
+    fi
+
+    # 4. CHANGES.md — add stub entry if version not already present
+    if [[ -f "$CHANGES" ]]; then
+        if ! grep -q "## \[$VERSION\]" "$CHANGES"; then
+            local TODAY
+            TODAY="$(date +%Y-%m-%d)"
+            local STUB
+            STUB="## [$VERSION] — $TODAY\n\n_No changes yet._\n"
+            # Insert after the "# Changes" header line
+            sedi "s/^# Changes$/# Changes\n\n$STUB/" "$CHANGES"
+            echo "Added CHANGES.md stub for $VERSION"
+            CHANGED=1
+        else
+            echo "CHANGES.md: already has entry for $VERSION"
+        fi
+    else
+        echo "Warning: $CHANGES not found" >&2
+    fi
+
+    # 5. Cargo.lock — regenerate
     if [[ $CHANGED -eq 1 ]]; then
         echo "Regenerating Cargo.lock..."
         (cd "$ROOT" && cargo check --quiet 2>/dev/null)
