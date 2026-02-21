@@ -236,15 +236,15 @@ fn to_prompt_mixed_valid_and_invalid() {
     assert!(stdout.contains("<name>good-skill</name>"));
 }
 
-// ── build ──────────────────────────────────────────────────────────
+// ── new (skill creation) ──────────────────────────────────────────
 
 #[test]
-fn build_deterministic_creates_dir() {
+fn new_deterministic_creates_dir() {
     let parent = tempdir().unwrap();
     let dir = parent.path().join("processing-pdf-files");
     aigent()
         .args([
-            "build",
+            "new",
             "Process PDF files",
             "--no-llm",
             "--dir",
@@ -257,12 +257,12 @@ fn build_deterministic_creates_dir() {
 }
 
 #[test]
-fn build_with_name_override() {
+fn new_with_name_override() {
     let parent = tempdir().unwrap();
     let dir = parent.path().join("my-pdf-tool");
     aigent()
         .args([
-            "build",
+            "new",
             "Process PDF files",
             "--no-llm",
             "--name",
@@ -276,13 +276,13 @@ fn build_with_name_override() {
 }
 
 #[test]
-fn build_with_dir_override() {
+fn new_with_dir_override() {
     let parent = tempdir().unwrap();
     let dir = parent.path().join("custom-output");
     // Use --name matching the dir name so validation passes.
     aigent()
         .args([
-            "build",
+            "new",
             "Process PDF files",
             "--no-llm",
             "--name",
@@ -336,13 +336,13 @@ fn init_with_dir_arg() {
 }
 
 #[test]
-fn built_skill_passes_validate() {
+fn new_skill_passes_validate() {
     let parent = tempdir().unwrap();
     let dir = parent.path().join("roundtrip-skill");
-    // Build the skill.
+    // Create the skill.
     aigent()
         .args([
-            "build",
+            "new",
             "Process PDF files",
             "--no-llm",
             "--name",
@@ -1415,12 +1415,12 @@ fn new_command_creates_skill() {
 }
 
 #[test]
-fn build_alias_produces_same_as_new() {
+fn create_alias_produces_same_as_new() {
     let parent = tempdir().unwrap();
-    // `build` is an alias for `new` — should produce same result.
+    // `create` is an alias for `new` — should produce same result.
     aigent()
         .args([
-            "build",
+            "create",
             "Analyze logs",
             "--no-llm",
             "--dir",
@@ -1511,6 +1511,100 @@ fn lint_alias_maps_to_check() {
         .assert()
         .success()
         .stderr(predicate::str::contains("info:"));
+}
+
+// ── M13: build (plugin assembly) (#83) ───────────────────────────
+
+#[test]
+fn build_assembles_single_skill() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: Does things\n---\nBody.\n",
+    );
+    let output = tempdir().unwrap();
+    let out_dir = output.path().join("plugin");
+    aigent()
+        .args([
+            "build",
+            dir.to_str().unwrap(),
+            "--output",
+            out_dir.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Assembled 1 skill"));
+    assert!(out_dir.join("plugin.json").exists());
+    assert!(out_dir.join("skills/my-skill/SKILL.md").exists());
+}
+
+#[test]
+fn build_assembles_multiple_skills() {
+    let (_p1, d1) = make_skill_dir(
+        "skill-one",
+        "---\nname: skill-one\ndescription: First\n---\nBody.\n",
+    );
+    let (_p2, d2) = make_skill_dir(
+        "skill-two",
+        "---\nname: skill-two\ndescription: Second\n---\nBody.\n",
+    );
+    let output = tempdir().unwrap();
+    let out_dir = output.path().join("plugin");
+    aigent()
+        .args([
+            "build",
+            d1.to_str().unwrap(),
+            d2.to_str().unwrap(),
+            "--output",
+            out_dir.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Assembled 2 skill"));
+}
+
+#[test]
+fn build_with_validate_rejects_invalid() {
+    let (_parent, dir) = make_skill_dir(
+        "bad-skill",
+        "---\ndescription: Missing name field\n---\nBody.\n",
+    );
+    let output = tempdir().unwrap();
+    let out_dir = output.path().join("plugin");
+    aigent()
+        .args([
+            "build",
+            dir.to_str().unwrap(),
+            "--output",
+            out_dir.to_str().unwrap(),
+            "--validate",
+        ])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn build_plugin_json_valid() {
+    let (_parent, dir) = make_skill_dir(
+        "test-skill",
+        "---\nname: test-skill\ndescription: Does things\n---\nBody.\n",
+    );
+    let output = tempdir().unwrap();
+    let out_dir = output.path().join("plugin");
+    aigent()
+        .args([
+            "build",
+            dir.to_str().unwrap(),
+            "--output",
+            out_dir.to_str().unwrap(),
+            "--name",
+            "my-plugin",
+        ])
+        .assert()
+        .success();
+    let json_str = fs::read_to_string(out_dir.join("plugin.json")).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+    assert_eq!(json["name"], "my-plugin");
+    assert_eq!(json["version"], "0.1.0");
 }
 
 // ── M13: fmt subcommand (#76) ────────────────────────────────────
@@ -1637,13 +1731,13 @@ fn watch_flag_without_feature_exits_with_message() {
 // ── M11: build --interactive flag ─────────────────────────────────
 
 #[test]
-fn build_interactive_flag_accepted() {
+fn new_interactive_flag_accepted() {
     // Just verify the flag is accepted (with piped "n" to cancel).
     let parent = tempdir().unwrap();
     let dir = parent.path().join("interactive-cli");
     aigent()
         .args([
-            "build",
+            "new",
             "Process PDF files and extract text from documents",
             "--no-llm",
             "--name",

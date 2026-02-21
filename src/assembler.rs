@@ -1,0 +1,366 @@
+//! Skill-to-plugin assembly: packages skill directories into a Claude Code plugin.
+//!
+//! Takes one or more skill directories and generates a complete plugin directory
+//! structure with a `plugin.json` manifest, `skills/` subdirectory containing
+//! the skill files, and scaffolded `agents/` and `hooks/` directories.
+
+use std::path::{Path, PathBuf};
+
+use crate::errors::{AigentError, Result};
+use crate::parser::{find_skill_md, read_properties};
+
+/// Options for plugin assembly.
+#[derive(Debug)]
+pub struct AssembleOptions {
+    /// Output directory for the assembled plugin.
+    pub output_dir: PathBuf,
+    /// Override plugin name (default: derived from first skill).
+    pub name: Option<String>,
+    /// Run validation on assembled skills.
+    pub validate: bool,
+}
+
+/// Result of a successful plugin assembly.
+#[derive(Debug)]
+pub struct AssembleResult {
+    /// Path to the assembled plugin directory.
+    pub plugin_dir: PathBuf,
+    /// Number of skills included.
+    pub skills_count: usize,
+}
+
+/// Assemble skills into a plugin directory.
+///
+/// Creates the output directory structure:
+/// ```text
+/// <output_dir>/
+/// ├── plugin.json
+/// ├── skills/
+/// │   ├── <skill-1>/
+/// │   │   └── SKILL.md
+/// │   └── <skill-2>/
+/// │       └── SKILL.md
+/// ├── agents/
+/// └── hooks/
+/// ```
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - No valid skills are found in the input directories
+/// - The output directory cannot be created
+/// - Skill files cannot be read or copied
+pub fn assemble_plugin(skill_dirs: &[&Path], opts: &AssembleOptions) -> Result<AssembleResult> {
+    if skill_dirs.is_empty() {
+        return Err(AigentError::Build {
+            message: "no skill directories provided".into(),
+        });
+    }
+
+    // Collect valid skills.
+    let mut skills: Vec<(String, PathBuf)> = Vec::new();
+    for dir in skill_dirs {
+        if let Some(skill_path) = find_skill_md(dir) {
+            match read_properties(dir) {
+                Ok(props) => {
+                    skills.push((props.name.clone(), skill_path));
+                }
+                Err(e) => {
+                    eprintln!("warning: skipping {}: {e}", dir.display());
+                }
+            }
+        } else {
+            eprintln!("warning: no SKILL.md in {}", dir.display());
+        }
+    }
+
+    if skills.is_empty() {
+        return Err(AigentError::Build {
+            message: "no valid skills found in provided directories".into(),
+        });
+    }
+
+    // Determine plugin name.
+    let plugin_name = opts.name.clone().unwrap_or_else(|| skills[0].0.clone());
+
+    // Create output directory structure.
+    let out = &opts.output_dir;
+    let skills_dir = out.join("skills");
+    let agents_dir = out.join("agents");
+    let hooks_dir = out.join("hooks");
+
+    std::fs::create_dir_all(&skills_dir)?;
+    std::fs::create_dir_all(&agents_dir)?;
+    std::fs::create_dir_all(&hooks_dir)?;
+
+    // Copy each skill into skills/<name>/.
+    for (name, skill_path) in &skills {
+        let dest_dir = skills_dir.join(name);
+        std::fs::create_dir_all(&dest_dir)?;
+
+        // Copy the SKILL.md file.
+        let dest_file = dest_dir.join("SKILL.md");
+        std::fs::copy(skill_path, &dest_file)?;
+
+        // Copy any sibling files in the same directory as SKILL.md.
+        if let Some(src_dir) = skill_path.parent() {
+            copy_skill_files(src_dir, &dest_dir)?;
+        }
+    }
+
+    // Validate assembled skills if requested.
+    if opts.validate {
+        let mut all_valid = true;
+        for (name, _) in &skills {
+            let dest_dir = skills_dir.join(name);
+            let diags = crate::validate(&dest_dir);
+            if diags.iter().any(|d| d.is_error()) {
+                all_valid = false;
+                for d in &diags {
+                    eprintln!("{name}: {d}");
+                }
+            }
+        }
+        if !all_valid {
+            return Err(AigentError::Build {
+                message: "assembled skills have validation errors".into(),
+            });
+        }
+    }
+
+    // Generate plugin.json.
+    let plugin_json = generate_plugin_json(&plugin_name, &skills);
+    std::fs::write(out.join("plugin.json"), plugin_json)?;
+
+    Ok(AssembleResult {
+        plugin_dir: out.clone(),
+        skills_count: skills.len(),
+    })
+}
+
+/// Copy non-SKILL.md files from source dir to destination dir.
+///
+/// Copies reference files, scripts, etc. that the skill may depend on.
+/// Skips hidden files and the target/ directory.
+fn copy_skill_files(src: &Path, dest: &Path) -> Result<()> {
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+
+        // Skip SKILL.md (already copied), hidden files, and target/.
+        if name_str == "SKILL.md"
+            || name_str == "skill.md"
+            || name_str.starts_with('.')
+            || name_str == "target"
+        {
+            continue;
+        }
+
+        let src_path = entry.path();
+        let dest_path = dest.join(&name);
+
+        if src_path.is_file() {
+            std::fs::copy(&src_path, &dest_path)?;
+        } else if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dest_path)?;
+        }
+    }
+    Ok(())
+}
+
+/// Recursively copy a directory.
+fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
+    std::fs::create_dir_all(dest)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dest_path = dest.join(entry.file_name());
+
+        if src_path.is_file() {
+            std::fs::copy(&src_path, &dest_path)?;
+        } else if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dest_path)?;
+        }
+    }
+    Ok(())
+}
+
+/// Generate plugin.json content from skill metadata.
+fn generate_plugin_json(name: &str, skills: &[(String, PathBuf)]) -> String {
+    let skill_names: Vec<String> = skills
+        .iter()
+        .map(|(name, _)| format!("    \"{}\"", name))
+        .collect();
+
+    format!(
+        r#"{{
+  "name": "{name}",
+  "description": "Plugin assembled from {count} skill(s)",
+  "version": "0.1.0",
+  "skills": [
+{skills_list}
+  ]
+}}"#,
+        name = name,
+        count = skills.len(),
+        skills_list = skill_names.join(",\n"),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    fn make_skill(parent: &Path, name: &str, content: &str) -> PathBuf {
+        let dir = parent.join(name);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("SKILL.md"), content).unwrap();
+        dir
+    }
+
+    #[test]
+    fn assemble_single_skill_creates_plugin() {
+        let parent = tempdir().unwrap();
+        let skill = make_skill(
+            parent.path(),
+            "my-skill",
+            "---\nname: my-skill\ndescription: Does things\n---\nBody.\n",
+        );
+        let out = parent.path().join("output");
+        let opts = AssembleOptions {
+            output_dir: out.clone(),
+            name: None,
+            validate: false,
+        };
+        let result = assemble_plugin(&[skill.as_path()], &opts).unwrap();
+        assert_eq!(result.skills_count, 1);
+        assert!(out.join("plugin.json").exists());
+        assert!(out.join("skills/my-skill/SKILL.md").exists());
+        assert!(out.join("agents").exists());
+        assert!(out.join("hooks").exists());
+    }
+
+    #[test]
+    fn assemble_multiple_skills() {
+        let parent = tempdir().unwrap();
+        let s1 = make_skill(
+            parent.path(),
+            "skill-one",
+            "---\nname: skill-one\ndescription: First\n---\nBody.\n",
+        );
+        let s2 = make_skill(
+            parent.path(),
+            "skill-two",
+            "---\nname: skill-two\ndescription: Second\n---\nBody.\n",
+        );
+        let out = parent.path().join("output");
+        let opts = AssembleOptions {
+            output_dir: out.clone(),
+            name: Some("my-plugin".into()),
+            validate: false,
+        };
+        let result = assemble_plugin(&[s1.as_path(), s2.as_path()], &opts).unwrap();
+        assert_eq!(result.skills_count, 2);
+        assert!(out.join("skills/skill-one/SKILL.md").exists());
+        assert!(out.join("skills/skill-two/SKILL.md").exists());
+    }
+
+    #[test]
+    fn assemble_plugin_json_has_correct_structure() {
+        let parent = tempdir().unwrap();
+        let skill = make_skill(
+            parent.path(),
+            "my-skill",
+            "---\nname: my-skill\ndescription: Does things\n---\nBody.\n",
+        );
+        let out = parent.path().join("output");
+        let opts = AssembleOptions {
+            output_dir: out.clone(),
+            name: Some("test-plugin".into()),
+            validate: false,
+        };
+        assemble_plugin(&[skill.as_path()], &opts).unwrap();
+        let json_str = fs::read_to_string(out.join("plugin.json")).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(json["name"], "test-plugin");
+        assert_eq!(json["version"], "0.1.0");
+        assert!(json["skills"].as_array().unwrap().len() == 1);
+    }
+
+    #[test]
+    fn assemble_no_skills_returns_error() {
+        let parent = tempdir().unwrap();
+        let out = parent.path().join("output");
+        let opts = AssembleOptions {
+            output_dir: out,
+            name: None,
+            validate: false,
+        };
+        let result = assemble_plugin(&[], &opts);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn assemble_copies_reference_files() {
+        let parent = tempdir().unwrap();
+        let skill_dir = parent.path().join("my-skill");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: my-skill\ndescription: Does things\n---\nBody.\n",
+        )
+        .unwrap();
+        fs::write(skill_dir.join("reference.md"), "Extra docs").unwrap();
+
+        let out = parent.path().join("output");
+        let opts = AssembleOptions {
+            output_dir: out.clone(),
+            name: None,
+            validate: false,
+        };
+        assemble_plugin(&[skill_dir.as_path()], &opts).unwrap();
+        assert!(out.join("skills/my-skill/reference.md").exists());
+    }
+
+    #[test]
+    fn assemble_with_validate_rejects_invalid_skill() {
+        let parent = tempdir().unwrap();
+        // Missing required 'name' field.
+        let skill = make_skill(
+            parent.path(),
+            "bad-skill",
+            "---\ndescription: Missing name\n---\nBody.\n",
+        );
+        let out = parent.path().join("output");
+        let opts = AssembleOptions {
+            output_dir: out,
+            name: None,
+            validate: true,
+        };
+        let result = assemble_plugin(&[skill.as_path()], &opts);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn assemble_name_defaults_to_first_skill() {
+        let parent = tempdir().unwrap();
+        let skill = make_skill(
+            parent.path(),
+            "first-skill",
+            "---\nname: first-skill\ndescription: Does things\n---\nBody.\n",
+        );
+        let out = parent.path().join("output");
+        let opts = AssembleOptions {
+            output_dir: out.clone(),
+            name: None,
+            validate: false,
+        };
+        assemble_plugin(&[skill.as_path()], &opts).unwrap();
+        let json_str = fs::read_to_string(out.join("plugin.json")).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(json["name"], "first-skill");
+    }
+}

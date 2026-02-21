@@ -148,7 +148,7 @@ enum Commands {
         output: Option<PathBuf>,
     },
     /// Create a new skill from a natural language description
-    #[command(alias = "build")]
+    #[command(alias = "create")]
     New {
         /// What the skill should do
         purpose: String,
@@ -197,6 +197,20 @@ enum Commands {
         /// Output format
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
+    },
+    /// Assemble skills into a Claude Code plugin
+    Build {
+        /// Paths to skill directories
+        skill_dirs: Vec<PathBuf>,
+        /// Output directory for the assembled plugin
+        #[arg(long, default_value = "./dist")]
+        output: PathBuf,
+        /// Override plugin name
+        #[arg(long)]
+        name: Option<String>,
+        /// Run validation on assembled skills
+        #[arg(long)]
+        validate: bool,
     },
     /// Check a skill for upgrade opportunities
     Upgrade {
@@ -711,6 +725,32 @@ fn main() {
                 },
                 Err(e) => {
                     eprintln!("aigent probe: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some(Commands::Build {
+            skill_dirs,
+            output,
+            name,
+            validate,
+        }) => {
+            let dirs: Vec<&std::path::Path> = skill_dirs.iter().map(|p| p.as_path()).collect();
+            let opts = aigent::AssembleOptions {
+                output_dir: output,
+                name,
+                validate,
+            };
+            match aigent::assemble_plugin(&dirs, &opts) {
+                Ok(result) => {
+                    println!(
+                        "Assembled {} skill(s) into {}",
+                        result.skills_count,
+                        result.plugin_dir.display()
+                    );
+                }
+                Err(e) => {
+                    eprintln!("aigent build: {e}");
                     std::process::exit(1);
                 }
             }

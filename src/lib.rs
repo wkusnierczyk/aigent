@@ -21,6 +21,8 @@
 
 #![warn(missing_docs)]
 
+/// Skill-to-plugin assembly: packages skills into Claude Code plugins.
+pub mod assembler;
 /// Skill builder: deterministic and LLM-enhanced skill generation.
 pub mod builder;
 /// Cross-skill conflict detection for skill collections.
@@ -51,6 +53,7 @@ pub mod tester;
 pub mod validator;
 
 // Re-export key types at crate root for convenience.
+pub use assembler::{assemble_plugin, AssembleOptions, AssembleResult};
 pub use conflict::{detect_conflicts, detect_conflicts_with_threshold};
 #[doc(inline)]
 pub use diagnostics::{Diagnostic, Severity, ValidationTarget};
