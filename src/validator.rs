@@ -15,6 +15,15 @@ use crate::parser::{
     find_skill_md, parse_frontmatter, read_file_checked, CLAUDE_CODE_KEYS, KNOWN_KEYS,
 };
 
+/// A warning collected during skill discovery when a path cannot be read or parsed.
+#[derive(Debug, Clone)]
+pub struct DiscoveryWarning {
+    /// The path that caused the warning.
+    pub path: std::path::PathBuf,
+    /// Human-readable description of the issue.
+    pub message: String,
+}
+
 /// Reserved words that must not appear as hyphen-delimited segments in a skill name.
 const RESERVED_WORDS: &[&str] = &["anthropic", "claude"];
 
@@ -425,6 +434,70 @@ fn discover_skills_recursive(dir: &Path, results: &mut Vec<std::path::PathBuf>) 
 
     for subdir in subdirs {
         discover_skills_recursive(&subdir, results);
+    }
+}
+
+/// Discover skill directories, collecting warnings for paths that could not be read.
+///
+/// Returns `(skill_paths, warnings)`. The original [`discover_skills()`] function
+/// remains unchanged for backward compatibility.
+#[must_use]
+pub fn discover_skills_verbose(root: &Path) -> (Vec<std::path::PathBuf>, Vec<DiscoveryWarning>) {
+    let mut skills = Vec::new();
+    let mut warnings = Vec::new();
+    discover_skills_recursive_verbose(root, &mut skills, &mut warnings);
+    skills.sort();
+    (skills, warnings)
+}
+
+/// Recursive helper for `discover_skills_verbose`.
+fn discover_skills_recursive_verbose(
+    dir: &Path,
+    results: &mut Vec<std::path::PathBuf>,
+    warnings: &mut Vec<DiscoveryWarning>,
+) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) => {
+            warnings.push(DiscoveryWarning {
+                path: dir.to_path_buf(),
+                message: format!("cannot read directory: {e}"),
+            });
+            return;
+        }
+    };
+
+    let mut has_skill_md = false;
+    let mut subdirs = Vec::new();
+
+    for entry_result in entries {
+        match entry_result {
+            Ok(entry) => {
+                let path = entry.path();
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if path.is_file() && (name == "SKILL.md" || name == "skill.md") {
+                        has_skill_md = true;
+                    }
+                    if path.is_dir() && !name.starts_with('.') {
+                        subdirs.push(path);
+                    }
+                }
+            }
+            Err(e) => {
+                warnings.push(DiscoveryWarning {
+                    path: dir.to_path_buf(),
+                    message: format!("cannot read directory entry: {e}"),
+                });
+            }
+        }
+    }
+
+    if has_skill_md {
+        results.push(dir.to_path_buf());
+    }
+
+    for subdir in subdirs {
+        discover_skills_recursive_verbose(&subdir, results, warnings);
     }
 }
 
@@ -1021,5 +1094,64 @@ mod tests {
         fs::write(skill_b.join("SKILL.md"), "---\nname: b\n---\n").unwrap();
         let dirs = discover_skills(parent.path());
         assert_eq!(dirs.len(), 2);
+    }
+
+    // ── discover_skills_verbose tests ─────────────────────────────────
+
+    #[test]
+    fn discover_skills_verbose_valid_directory() {
+        let parent = tempdir().unwrap();
+        let skill_dir = parent.path().join("my-skill");
+        fs::create_dir(&skill_dir).unwrap();
+        fs::write(skill_dir.join("SKILL.md"), "---\nname: test\n---\n").unwrap();
+        let (dirs, warnings) = discover_skills_verbose(parent.path());
+        assert_eq!(dirs.len(), 1);
+        assert_eq!(dirs[0], skill_dir);
+        assert!(
+            warnings.is_empty(),
+            "expected no warnings, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn discover_skills_verbose_unreadable_root() {
+        let nonexistent = std::path::Path::new("/nonexistent/path/that/does/not/exist");
+        let (dirs, warnings) = discover_skills_verbose(nonexistent);
+        assert!(dirs.is_empty());
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].message.contains("cannot read directory"),
+            "expected read error, got: {}",
+            warnings[0].message
+        );
+        assert_eq!(warnings[0].path, nonexistent);
+    }
+
+    #[test]
+    fn discover_skills_verbose_multiple_no_warnings() {
+        let parent = tempdir().unwrap();
+        let skill_a = parent.path().join("skill-a");
+        let skill_b = parent.path().join("skill-b");
+        fs::create_dir(&skill_a).unwrap();
+        fs::create_dir(&skill_b).unwrap();
+        fs::write(skill_a.join("SKILL.md"), "---\nname: a\n---\n").unwrap();
+        fs::write(skill_b.join("SKILL.md"), "---\nname: b\n---\n").unwrap();
+        let (dirs, warnings) = discover_skills_verbose(parent.path());
+        assert_eq!(dirs.len(), 2);
+        assert!(
+            warnings.is_empty(),
+            "expected no warnings, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn discover_skills_backward_compat() {
+        let parent = tempdir().unwrap();
+        let skill_dir = parent.path().join("my-skill");
+        fs::create_dir(&skill_dir).unwrap();
+        fs::write(skill_dir.join("SKILL.md"), "---\nname: test\n---\n").unwrap();
+        let original = discover_skills(parent.path());
+        let (verbose, _) = discover_skills_verbose(parent.path());
+        assert_eq!(original, verbose, "verbose variant should match original");
     }
 }
