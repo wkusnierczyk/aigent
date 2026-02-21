@@ -60,14 +60,17 @@ pub fn format_skill(dir: &Path) -> Result<FormatResult> {
 ///
 /// Returns an error if the content lacks valid `---` frontmatter delimiters.
 pub fn format_content(original: &str) -> Result<String> {
+    // Normalize CRLF to LF so byte-offset arithmetic works correctly.
+    let content = original.replace("\r\n", "\n");
+
     // Split into frontmatter and body.
-    if !original.starts_with("---") {
+    if !content.starts_with("---") {
         return Err(AigentError::Parse {
             message: "SKILL.md must start with --- delimiter".into(),
         });
     }
 
-    let after_first = &original[3..];
+    let after_first = &content[3..];
     let close_pos = after_first.find("\n---\n").or_else(|| {
         // Handle case where closing --- is at end of file.
         if after_first.ends_with("\n---") {
@@ -413,5 +416,48 @@ mod tests {
         let input = "---\n---\nBody.\n";
         let result = format_content(input).unwrap();
         assert!(result.contains("---\n\n---\n"));
+    }
+
+    #[test]
+    fn format_crlf_produces_lf_output() {
+        let crlf = "---\r\nname: my-skill\r\ndescription: A skill\r\n---\r\n\r\nBody text.\r\n";
+        let result = format_content(crlf).unwrap();
+        assert!(
+            !result.contains("\r\n"),
+            "output should not contain CRLF line endings"
+        );
+        assert!(result.contains("name: my-skill"));
+        assert!(result.contains("description: A skill"));
+        assert!(result.contains("Body text.\n"));
+    }
+
+    #[test]
+    fn format_mixed_lf_crlf_normalizes_to_lf() {
+        let mixed = "---\nname: my-skill\r\ndescription: A skill\n---\r\n\nBody text.\r\n";
+        let result = format_content(mixed).unwrap();
+        assert!(
+            !result.contains("\r\n"),
+            "output should not contain any CRLF after normalization"
+        );
+        assert!(result.contains("name: my-skill"));
+        assert!(result.contains("description: A skill"));
+    }
+
+    #[test]
+    fn format_lf_input_unchanged_by_normalization() {
+        let lf = "---\nname: my-skill\ndescription: A skill\n---\nBody text.\n";
+        let result = format_content(lf).unwrap();
+        assert_eq!(result, lf, "LF-only input should produce identical output");
+    }
+
+    #[test]
+    fn format_crlf_is_idempotent_after_normalization() {
+        let crlf = "---\r\nname: my-skill\r\ndescription: A skill\r\n---\r\n\r\nBody text.\r\n";
+        let first = format_content(crlf).unwrap();
+        let second = format_content(&first).unwrap();
+        assert_eq!(
+            first, second,
+            "formatting should be idempotent after CRLF normalization"
+        );
     }
 }
