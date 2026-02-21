@@ -12,11 +12,37 @@ pub use llm::LlmProvider;
 pub use template::SkillTemplate;
 
 use std::collections::HashMap;
+use std::fs::OpenOptions;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use crate::errors::{AigentError, Result};
 use crate::models::SkillProperties;
-use crate::parser::find_skill_md;
+
+/// Write content to a file atomically, failing if the file already exists.
+///
+/// Uses `create_new(true)` to prevent TOCTOU races. Returns a descriptive
+/// error including the file path on failure.
+fn write_exclusive(path: &Path, content: &[u8]) -> Result<()> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                AigentError::Build {
+                    message: format!("SKILL.md already exists: {}", path.display()),
+                }
+            } else {
+                AigentError::Build {
+                    message: format!("cannot create {}: {e}", path.display()),
+                }
+            }
+        })?;
+    file.write_all(content).map_err(|e| AigentError::Build {
+        message: format!("cannot write {}: {e}", path.display()),
+    })
+}
 use crate::validator::validate;
 
 use deterministic::{generate_body, generate_description};
@@ -160,23 +186,14 @@ pub fn build_skill(spec: &SkillSpec) -> Result<BuildResult> {
     // 7. Assemble SKILL.md content.
     let content = format!("---\n{yaml}---\n{body}");
 
-    // 8. Check for existing SKILL.md.
-    if output_dir.exists() {
-        if let Some(existing) = find_skill_md(&output_dir) {
-            return Err(AigentError::Build {
-                message: format!("already exists: {}", existing.display()),
-            });
-        }
-    }
-
-    // 9. Create output directory if needed.
+    // 8. Create output directory if needed.
     std::fs::create_dir_all(&output_dir)?;
 
-    // 10. Write SKILL.md.
+    // 9. Write SKILL.md atomically (fails if file already exists).
     let skill_md_path = output_dir.join("SKILL.md");
-    std::fs::write(&skill_md_path, &content)?;
+    write_exclusive(&skill_md_path, content.as_bytes())?;
 
-    // 11. Write extra files if present.
+    // 10. Write extra files if present.
     let mut files = HashMap::new();
     files.insert("SKILL.md".to_string(), content);
 
@@ -202,7 +219,7 @@ pub fn build_skill(spec: &SkillSpec) -> Result<BuildResult> {
         }
     }
 
-    // 12. Validate output.
+    // 11. Validate output.
     let diags = validate(&output_dir);
     let errors: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
     if !errors.is_empty() {
@@ -224,7 +241,7 @@ pub fn build_skill(spec: &SkillSpec) -> Result<BuildResult> {
         });
     }
 
-    // 13. Return BuildResult.
+    // 12. Return BuildResult.
     Ok(BuildResult {
         properties,
         files,
@@ -257,15 +274,6 @@ pub fn assess_clarity(purpose: &str) -> ClarityAssessment {
 /// (or skill.md) already exists in the target directory. The `tmpl` parameter
 /// selects the template variant; use `SkillTemplate::Minimal` for the default.
 pub fn init_skill(dir: &Path, tmpl: SkillTemplate) -> Result<PathBuf> {
-    // Check for existing SKILL.md.
-    if dir.exists() {
-        if let Some(existing) = find_skill_md(dir) {
-            return Err(AigentError::Build {
-                message: format!("already exists: {}", existing.display()),
-            });
-        }
-    }
-
     // Derive directory name for the template.
     // Filter out "." and ".." which produce empty kebab-case names.
     let dir_name = dir
@@ -296,7 +304,13 @@ pub fn init_skill(dir: &Path, tmpl: SkillTemplate) -> Result<PathBuf> {
         if let Some(parent) = full_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(&full_path, content)?;
+
+        // Use atomic exclusive creation for SKILL.md to prevent TOCTOU races.
+        if rel_path == "SKILL.md" {
+            write_exclusive(&full_path, content.as_bytes())?;
+        } else {
+            std::fs::write(&full_path, content)?;
+        }
 
         // On Unix, set execute bit on shell scripts.
         #[cfg(unix)]
@@ -753,6 +767,90 @@ mod tests {
         let result = build_skill(&spec).unwrap();
         assert!(dir.join("SKILL.md").exists());
         assert_eq!(result.properties.name, "processing-pdf-files");
+    }
+
+    // ── TOCTOU race fix tests ──────────────────────────────────────
+
+    #[test]
+    fn build_existing_skill_md_error_contains_path() {
+        let parent = tempdir().unwrap();
+        let dir = parent.path().join("toctou-build");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("SKILL.md"), "---\nname: x\n---\n").unwrap();
+        let spec = SkillSpec {
+            purpose: "Process PDF files".to_string(),
+            name: Some("toctou-build".to_string()),
+            output_dir: Some(dir.clone()),
+            no_llm: true,
+            ..Default::default()
+        };
+        let result = build_skill(&spec);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("SKILL.md already exists"),
+            "error should say 'SKILL.md already exists': {err}"
+        );
+        assert!(
+            err.contains(&dir.join("SKILL.md").display().to_string()),
+            "error should contain the file path: {err}"
+        );
+    }
+
+    #[test]
+    fn init_existing_skill_md_error_contains_path() {
+        let parent = tempdir().unwrap();
+        let dir = parent.path().join("toctou-init");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("SKILL.md"), "---\nname: x\n---\n").unwrap();
+        let result = init_skill(&dir, SkillTemplate::Minimal);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("SKILL.md already exists"),
+            "error should say 'SKILL.md already exists': {err}"
+        );
+        assert!(
+            err.contains(&dir.join("SKILL.md").display().to_string()),
+            "error should contain the file path: {err}"
+        );
+    }
+
+    #[test]
+    fn build_does_not_overwrite_existing_skill_md() {
+        let parent = tempdir().unwrap();
+        let dir = parent.path().join("no-overwrite-build");
+        std::fs::create_dir_all(&dir).unwrap();
+        let original = "---\nname: original\n---\nOriginal content\n";
+        std::fs::write(dir.join("SKILL.md"), original).unwrap();
+        let spec = SkillSpec {
+            purpose: "Process PDF files".to_string(),
+            name: Some("no-overwrite-build".to_string()),
+            output_dir: Some(dir.clone()),
+            no_llm: true,
+            ..Default::default()
+        };
+        let _ = build_skill(&spec);
+        let content = std::fs::read_to_string(dir.join("SKILL.md")).unwrap();
+        assert_eq!(
+            content, original,
+            "existing SKILL.md must not be overwritten"
+        );
+    }
+
+    #[test]
+    fn init_does_not_overwrite_existing_skill_md() {
+        let parent = tempdir().unwrap();
+        let dir = parent.path().join("no-overwrite-init");
+        std::fs::create_dir_all(&dir).unwrap();
+        let original = "---\nname: original\n---\nOriginal content\n";
+        std::fs::write(dir.join("SKILL.md"), original).unwrap();
+        let _ = init_skill(&dir, SkillTemplate::Minimal);
+        let content = std::fs::read_to_string(dir.join("SKILL.md")).unwrap();
+        assert_eq!(
+            content, original,
+            "existing SKILL.md must not be overwritten"
+        );
     }
 
     #[test]

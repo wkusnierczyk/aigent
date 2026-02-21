@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use crate::parser::{find_skill_md, read_properties};
+use crate::validator::DiscoveryWarning;
 
 /// A parsed skill entry for prompt generation.
 ///
@@ -79,6 +80,54 @@ pub fn collect_skills(dirs: &[&Path]) -> Vec<SkillEntry> {
     entries
 }
 
+/// Collect skill entries from directories, collecting warnings for skills that could not be parsed.
+///
+/// Returns `(entries, warnings)`. The original [`collect_skills()`] function
+/// remains unchanged for backward compatibility.
+#[must_use]
+pub fn collect_skills_verbose(dirs: &[&Path]) -> (Vec<SkillEntry>, Vec<DiscoveryWarning>) {
+    let mut entries = Vec::new();
+    let mut warnings = Vec::new();
+
+    for dir in dirs {
+        let canonical = match std::fs::canonicalize(dir) {
+            Ok(p) => p,
+            Err(e) => {
+                warnings.push(DiscoveryWarning {
+                    path: dir.to_path_buf(),
+                    message: format!("cannot canonicalize path: {e}"),
+                });
+                continue;
+            }
+        };
+
+        let props = match read_properties(&canonical) {
+            Ok(p) => p,
+            Err(e) => {
+                warnings.push(DiscoveryWarning {
+                    path: canonical,
+                    message: format!("cannot read skill properties: {e}"),
+                });
+                continue;
+            }
+        };
+
+        // find_skill_md is called again (read_properties calls it internally),
+        // but we need the actual path for the location field.
+        let location = find_skill_md(&canonical)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| canonical.join("SKILL.md").to_string_lossy().to_string());
+
+        entries.push(SkillEntry {
+            name: props.name,
+            description: props.description,
+            location,
+        });
+    }
+
+    (entries, warnings)
+}
+
 /// Generate an `<available_skills>` XML block from skill directories.
 ///
 /// Each directory is canonicalized to an absolute path, then its SKILL.md
@@ -113,11 +162,20 @@ pub fn to_prompt(dirs: &[&Path]) -> String {
 #[must_use]
 pub fn to_prompt_format(dirs: &[&Path], format: PromptFormat) -> String {
     let entries = collect_skills(dirs);
+    format_entries(&entries, format)
+}
+
+/// Format pre-collected skill entries in the specified output format.
+///
+/// Use this with [`collect_skills_verbose`] when you need access to both the
+/// formatted output and any discovery warnings.
+#[must_use]
+pub fn format_entries(entries: &[SkillEntry], format: PromptFormat) -> String {
     match format {
-        PromptFormat::Xml => format_xml(&entries),
-        PromptFormat::Json => format_json(&entries),
-        PromptFormat::Yaml => format_yaml(&entries),
-        PromptFormat::Markdown => format_markdown(&entries),
+        PromptFormat::Xml => format_xml(entries),
+        PromptFormat::Json => format_json(entries),
+        PromptFormat::Yaml => format_yaml(entries),
+        PromptFormat::Markdown => format_markdown(entries),
     }
 }
 
@@ -593,5 +651,94 @@ mod tests {
     #[test]
     fn yaml_quote_quotes() {
         assert_eq!(yaml_quote("say \"hi\""), "\"say \\\"hi\\\"\"");
+    }
+
+    // ── collect_skills_verbose tests ─────────────────────────────────
+
+    #[test]
+    fn collect_skills_verbose_valid() {
+        let (_parent, dir) = make_skill_dir(
+            "my-skill",
+            "---\nname: my-skill\ndescription: A test skill\n---\n",
+        );
+        let (entries, warnings) = collect_skills_verbose(&[dir.as_path()]);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "my-skill");
+        assert!(
+            warnings.is_empty(),
+            "expected no warnings, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn collect_skills_verbose_invalid_skill_md() {
+        let parent = tempdir().unwrap();
+        let bad = parent.path().join("bad-skill");
+        fs::create_dir(&bad).unwrap();
+        // Write an invalid SKILL.md with no frontmatter delimiters.
+        fs::write(bad.join("SKILL.md"), "no frontmatter here").unwrap();
+        let (entries, warnings) = collect_skills_verbose(&[bad.as_path()]);
+        assert!(entries.is_empty(), "expected no entries for invalid skill");
+        assert_eq!(warnings.len(), 1, "expected one warning, got: {warnings:?}");
+        assert!(
+            warnings[0].message.contains("cannot read skill properties"),
+            "expected parse error warning, got: {}",
+            warnings[0].message
+        );
+    }
+
+    #[test]
+    fn collect_skills_verbose_missing_skill_md() {
+        let parent = tempdir().unwrap();
+        let empty = parent.path().join("empty-dir");
+        fs::create_dir(&empty).unwrap();
+        let (entries, warnings) = collect_skills_verbose(&[empty.as_path()]);
+        assert!(entries.is_empty());
+        assert_eq!(warnings.len(), 1, "expected one warning, got: {warnings:?}");
+        assert!(
+            warnings[0].message.contains("cannot read skill properties"),
+            "expected parse error warning, got: {}",
+            warnings[0].message
+        );
+    }
+
+    #[test]
+    fn collect_skills_verbose_nonexistent_path() {
+        let nonexistent = std::path::Path::new("/nonexistent/path/does/not/exist");
+        let (entries, warnings) = collect_skills_verbose(&[nonexistent]);
+        assert!(entries.is_empty());
+        assert_eq!(warnings.len(), 1, "expected one warning, got: {warnings:?}");
+        assert!(
+            warnings[0].message.contains("cannot canonicalize"),
+            "expected canonicalize error, got: {}",
+            warnings[0].message
+        );
+    }
+
+    #[test]
+    fn collect_skills_backward_compat() {
+        let (_parent, dir) = make_skill_dir(
+            "my-skill",
+            "---\nname: my-skill\ndescription: A test skill\n---\n",
+        );
+        let original = collect_skills(&[dir.as_path()]);
+        let (verbose, _) = collect_skills_verbose(&[dir.as_path()]);
+        assert_eq!(original.len(), verbose.len());
+        assert_eq!(original[0].name, verbose[0].name);
+        assert_eq!(original[0].description, verbose[0].description);
+    }
+
+    // ── format_entries tests ─────────────────────────────────────────
+
+    #[test]
+    fn format_entries_xml() {
+        let entries = vec![SkillEntry {
+            name: "test-skill".to_string(),
+            description: "Does things".to_string(),
+            location: "/path/to/SKILL.md".to_string(),
+        }];
+        let result = format_entries(&entries, PromptFormat::Xml);
+        assert!(result.contains("<name>test-skill</name>"));
+        assert!(result.starts_with("<available_skills>"));
     }
 }
