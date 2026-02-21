@@ -14,10 +14,12 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use crate::diagnostics::{Diagnostic, Severity, S001, S003, S004, S005, S006};
-use crate::fs_util::{is_regular_dir, is_regular_file, is_symlink};
+use crate::fs_util::{is_regular_dir, is_symlink};
 
 #[cfg(unix)]
 use crate::diagnostics::S002;
+#[cfg(unix)]
+use crate::fs_util::is_regular_file;
 
 /// Maximum allowed nesting depth for files referenced from SKILL.md.
 const MAX_REFERENCE_DEPTH: usize = 1;
