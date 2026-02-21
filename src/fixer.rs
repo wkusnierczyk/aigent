@@ -11,7 +11,7 @@ use regex::Regex;
 
 use crate::diagnostics::{Diagnostic, E002, E003, E006, E012};
 use crate::errors::Result;
-use crate::parser::find_skill_md;
+use crate::parser::{find_skill_md, read_file_checked};
 
 /// Regex for matching the `name` field line in frontmatter.
 static NAME_RE: LazyLock<Regex> =
@@ -40,7 +40,7 @@ pub fn apply_fixes(dir: &Path, diagnostics: &[Diagnostic]) -> Result<usize> {
         message: "SKILL.md not found".to_string(),
     })?;
 
-    let content = std::fs::read_to_string(&path)?;
+    let content = read_file_checked(&path)?;
     let mut modified = content.clone();
     let mut fix_count = 0;
 
