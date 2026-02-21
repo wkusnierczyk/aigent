@@ -2,7 +2,7 @@
 
 ---
 
-Agent Skills are how you teach AI coding assistants what they know. In Claude Code, a SKILL.md file — a Markdown document with YAML frontmatter — tells the agent what a skill does, when to activate it, and how to use it. As teams build more skills, quality becomes a bottleneck: inconsistent naming, vague descriptions, untested activation patterns, and no way to enforce standards in CI. The official reference implementation validates structure, but if you're authoring skills at scale, you need more.
+Skills are AI agent know-how. In Claude Code, a SKILL.md file — a Markdown document with YAML frontmatter — tells the agent what a skill does, when to activate it, and how to use it. As teams build more skills, quality becomes a bottleneck: inconsistent naming, vague descriptions, untested activation patterns, and no way to enforce standards in CI. The official reference implementation validates structure, but if you're authoring skills at scale, you need more.
 
 **aigent** is a Rust library, CLI tool, and Claude Code plugin for working with Agent Skills.
 

@@ -55,7 +55,7 @@ pub fn validate_structure(dir: &Path) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
 
     // Read the SKILL.md body for reference checking.
-    let body = crate::parser::read_body(dir);
+    let body = crate::parser::read_body(dir).unwrap_or_default();
 
     // S001 + S003 + S006: Check file references in the body.
     diags.extend(check_references(dir, &body));

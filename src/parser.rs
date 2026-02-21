@@ -268,22 +268,21 @@ pub fn read_properties(dir: &Path) -> Result<SkillProperties> {
 /// Read the markdown body (post-frontmatter) from a skill directory.
 ///
 /// Locates the SKILL.md file, reads its content, parses the frontmatter,
-/// and returns the body portion. Returns an empty string if the file
-/// cannot be found, read, or parsed.
-#[must_use]
-pub fn read_body(dir: &Path) -> String {
-    let path = match find_skill_md(dir) {
-        Some(p) => p,
-        None => return String::new(),
-    };
-    let content = match read_file_checked(&path) {
-        Ok(c) => c,
-        Err(_) => return String::new(),
-    };
-    match parse_frontmatter(&content) {
-        Ok((_, body)) => body,
-        Err(_) => String::new(),
-    }
+/// and returns the body portion. Returns `Ok(String::new())` when the
+/// file has valid frontmatter but no body after the closing `---`.
+///
+/// # Errors
+///
+/// - `AigentError::Parse` if no SKILL.md is found in the directory.
+/// - `AigentError::Parse` if the file cannot be read or exceeds 1 MiB.
+/// - `AigentError::Yaml` or `AigentError::Parse` if frontmatter parsing fails.
+pub fn read_body(dir: &Path) -> Result<String> {
+    let path = find_skill_md(dir).ok_or_else(|| AigentError::Parse {
+        message: "no SKILL.md found".to_string(),
+    })?;
+    let content = read_file_checked(&path)?;
+    let (_, body) = parse_frontmatter(&content)?;
+    Ok(body)
 }
 
 #[cfg(test)]
@@ -607,6 +606,43 @@ custom-key: value
         assert!(
             err.to_string().contains("cannot read"),
             "unexpected error message: {err}"
+        );
+    }
+
+    // ── read_body tests ───────────────────────────────────────────────
+
+    #[test]
+    fn read_body_valid_skill_returns_body() {
+        let content = "---\nname: test\ndescription: desc\n---\n# Body\n\nHello world\n";
+        let dir = write_skill_md(content);
+        let body = read_body(dir.path()).unwrap();
+        assert!(body.contains("# Body"));
+        assert!(body.contains("Hello world"));
+    }
+
+    #[test]
+    fn read_body_no_skill_md_returns_err() {
+        let dir = tempdir().unwrap();
+        let err = read_body(dir.path()).unwrap_err();
+        assert!(matches!(err, AigentError::Parse { .. }));
+    }
+
+    #[test]
+    fn read_body_empty_body_returns_ok_empty() {
+        let content = "---\nname: test\ndescription: desc\n---\n";
+        let dir = write_skill_md(content);
+        let body = read_body(dir.path()).unwrap();
+        assert!(body.is_empty());
+    }
+
+    #[test]
+    fn read_body_error_message_contains_no_skill_md() {
+        let dir = tempdir().unwrap();
+        let err = read_body(dir.path()).unwrap_err();
+        assert!(
+            err.to_string().contains("no SKILL.md found"),
+            "error message should contain 'no SKILL.md found', got: {}",
+            err
         );
     }
 }

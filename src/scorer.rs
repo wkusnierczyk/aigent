@@ -107,7 +107,7 @@ pub fn score(dir: &Path) -> ScoreResult {
     // Only run lint checks if the skill is parseable (no infrastructure errors).
     let quality = match crate::parser::read_properties(dir) {
         Ok(props) => {
-            let body = crate::parser::read_body(dir);
+            let body = crate::parser::read_body(dir).unwrap_or_default();
             let lint_diags = linter::lint(&props, &body);
             score_quality(&lint_diags)
         }

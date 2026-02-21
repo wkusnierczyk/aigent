@@ -471,7 +471,7 @@ fn main() {
                 // Always run semantic lint checks (the core of `check`).
                 match aigent::read_properties(dir) {
                     Ok(props) => {
-                        let body = aigent::read_body(dir);
+                        let body = aigent::read_body(dir).unwrap_or_default();
                         diags.extend(aigent::lint(&props, &body));
                     }
                     Err(e) => {
@@ -1287,7 +1287,7 @@ fn run_upgrade(
     if full {
         let mut diags = aigent::validate(dir);
         if let Ok(props) = aigent::read_properties(dir) {
-            let body = aigent::read_body(dir);
+            let body = aigent::read_body(dir).unwrap_or_default();
             diags.extend(aigent::lint(&props, &body));
         }
 
@@ -1307,7 +1307,7 @@ fn run_upgrade(
                 // Re-run diagnostics after fixes to get fresh state.
                 diags = aigent::validate(dir);
                 if let Ok(props) = aigent::read_properties(dir) {
-                    let body = aigent::read_body(dir);
+                    let body = aigent::read_body(dir).unwrap_or_default();
                     diags.extend(aigent::lint(&props, &body));
                 }
             }
@@ -1379,7 +1379,7 @@ fn run_upgrade(
     }
 
     // Check body length.
-    let body = aigent::read_body(dir);
+    let body = aigent::read_body(dir)?;
     let line_count = body.lines().count();
     if line_count > 500 {
         suggestions.push(format!(
