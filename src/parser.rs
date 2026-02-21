@@ -4,17 +4,18 @@ use std::path::{Path, PathBuf};
 use serde_yaml_ng::Value;
 
 use crate::errors::{AigentError, Result};
+use crate::fs_util::is_regular_file;
 use crate::models::SkillProperties;
 
 /// Locate SKILL.md in a directory (prefer uppercase over lowercase).
 #[must_use]
 pub fn find_skill_md(dir: &Path) -> Option<PathBuf> {
     let uppercase = dir.join("SKILL.md");
-    if uppercase.is_file() {
+    if is_regular_file(&uppercase) {
         return Some(uppercase);
     }
     let lowercase = dir.join("skill.md");
-    if lowercase.is_file() {
+    if is_regular_file(&lowercase) {
         return Some(lowercase);
     }
     None
@@ -316,6 +317,20 @@ mod tests {
         let dir = tempdir().unwrap();
         let result = find_skill_md(dir.path());
         assert!(result.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn find_skill_md_ignores_symlink() {
+        let dir = tempdir().unwrap();
+        // Create a real SKILL.md elsewhere and symlink to it.
+        let target = dir.path().join("real_skill.md");
+        fs::write(&target, "---\nname: test\n---\n").unwrap();
+        let link = dir.path().join("SKILL.md");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        // find_skill_md should ignore the symlink and return None.
+        let result = find_skill_md(dir.path());
+        assert!(result.is_none(), "symlinked SKILL.md should be ignored");
     }
 
     // ── parse_frontmatter tests ──────────────────────────────────────

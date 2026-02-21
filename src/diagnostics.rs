@@ -171,6 +171,8 @@ pub const S002: &str = "S002";
 pub const S003: &str = "S003";
 /// Excessive directory nesting depth.
 pub const S004: &str = "S004";
+/// Symlink detected in skill directory.
+pub const S005: &str = "S005";
 /// Path traversal in reference link.
 pub const S006: &str = "S006";
 
@@ -304,8 +306,8 @@ mod tests {
     fn error_codes_are_unique() {
         let codes = [
             E000, E001, E002, E003, E004, E005, E006, E007, E008, E009, E010, E011, E012, E013,
-            E014, E015, E016, E017, E018, W001, W002, S001, S002, S003, S004, S006, C001, C002,
-            C003,
+            E014, E015, E016, E017, E018, W001, W002, S001, S002, S003, S004, S005, S006, C001,
+            C002, C003,
         ];
         let mut seen = std::collections::HashSet::new();
         for code in &codes {

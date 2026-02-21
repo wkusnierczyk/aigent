@@ -10,6 +10,7 @@ use crate::diagnostics::{
     Diagnostic, Severity, ValidationTarget, E000, E001, E002, E003, E004, E005, E006, E007, E009,
     E010, E011, E012, E013, E014, E015, E016, E017, E018, W001, W002,
 };
+use crate::fs_util::{is_regular_dir, is_regular_file};
 use crate::parser::{find_skill_md, parse_frontmatter, CLAUDE_CODE_KEYS, KNOWN_KEYS};
 
 /// Reserved words that must not appear as hyphen-delimited segments in a skill name.
@@ -413,10 +414,10 @@ fn discover_skills_recursive(dir: &Path, results: &mut Vec<std::path::PathBuf>) 
     for entry in entries.flatten() {
         let path = entry.path();
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            if path.is_file() && (name == "SKILL.md" || name == "skill.md") {
+            if is_regular_file(&path) && (name == "SKILL.md" || name == "skill.md") {
                 has_skill_md = true;
             }
-            if path.is_dir() && !name.starts_with('.') {
+            if is_regular_dir(&path) && !name.starts_with('.') {
                 subdirs.push(path);
             }
         }
