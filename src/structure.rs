@@ -269,12 +269,22 @@ fn check_nesting_recursive(root: &Path, current: &Path, depth: usize, diags: &mu
 /// the skill directory boundary.
 fn check_symlinks(dir: &Path) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
-    check_symlinks_recursive(dir, dir, &mut diags);
+    check_symlinks_recursive(dir, dir, 0, &mut diags);
     diags
 }
 
 /// Recursive helper for symlink detection.
-fn check_symlinks_recursive(root: &Path, current: &Path, diags: &mut Vec<Diagnostic>) {
+///
+/// Stops recursing when `depth` exceeds [`MAX_NESTING_DEPTH`].
+fn check_symlinks_recursive(
+    root: &Path,
+    current: &Path,
+    depth: usize,
+    diags: &mut Vec<Diagnostic>,
+) {
+    if depth > MAX_NESTING_DEPTH {
+        return;
+    }
     let entries = match std::fs::read_dir(current) {
         Ok(e) => e,
         Err(_) => return,
@@ -307,7 +317,7 @@ fn check_symlinks_recursive(root: &Path, current: &Path, diags: &mut Vec<Diagnos
                 ),
             );
         } else if is_regular_dir(&path) {
-            check_symlinks_recursive(root, &path, diags);
+            check_symlinks_recursive(root, &path, depth + 1, diags);
         }
     }
 }

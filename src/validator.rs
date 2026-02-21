@@ -468,6 +468,10 @@ fn discover_skills_recursive_verbose(
     depth: usize,
 ) {
     if depth > MAX_DISCOVERY_DEPTH {
+        warnings.push(DiscoveryWarning {
+            path: dir.to_path_buf(),
+            message: format!("exceeded maximum discovery depth ({MAX_DISCOVERY_DEPTH})"),
+        });
         return;
     }
     let entries = match std::fs::read_dir(dir) {

@@ -112,16 +112,11 @@ pub fn collect_skills_verbose(dirs: &[&Path]) -> (Vec<SkillEntry>, Vec<Discovery
             }
         };
 
-        let location = match find_skill_md(&canonical) {
-            Some(p) => p.to_string_lossy().to_string(),
-            None => {
-                warnings.push(DiscoveryWarning {
-                    path: canonical,
-                    message: "SKILL.md not found after successful parse".to_string(),
-                });
-                continue;
-            }
-        };
+        // find_skill_md is called again (read_properties calls it internally),
+        // but we need the actual path for the location field.
+        let location = find_skill_md(&canonical)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| canonical.join("SKILL.md").to_string_lossy().to_string());
 
         entries.push(SkillEntry {
             name: props.name,

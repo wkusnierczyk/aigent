@@ -18,6 +18,31 @@ use std::path::{Path, PathBuf};
 
 use crate::errors::{AigentError, Result};
 use crate::models::SkillProperties;
+
+/// Write content to a file atomically, failing if the file already exists.
+///
+/// Uses `create_new(true)` to prevent TOCTOU races. Returns a descriptive
+/// error including the file path on failure.
+fn write_exclusive(path: &Path, content: &[u8]) -> Result<()> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                AigentError::Build {
+                    message: format!("SKILL.md already exists: {}", path.display()),
+                }
+            } else {
+                AigentError::Build {
+                    message: format!("cannot create {}: {e}", path.display()),
+                }
+            }
+        })?;
+    file.write_all(content).map_err(|e| AigentError::Build {
+        message: format!("cannot write {}: {e}", path.display()),
+    })
+}
 use crate::validator::validate;
 
 use deterministic::{generate_body, generate_description};
@@ -166,27 +191,9 @@ pub fn build_skill(spec: &SkillSpec) -> Result<BuildResult> {
 
     // 9. Write SKILL.md atomically (fails if file already exists).
     let skill_md_path = output_dir.join("SKILL.md");
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&skill_md_path)
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::AlreadyExists {
-                AigentError::Build {
-                    message: format!("SKILL.md already exists: {}", skill_md_path.display()),
-                }
-            } else {
-                AigentError::Build {
-                    message: format!("cannot create {}: {e}", skill_md_path.display()),
-                }
-            }
-        })?;
-    file.write_all(content.as_bytes())
-        .map_err(|e| AigentError::Build {
-            message: format!("cannot write {}: {e}", skill_md_path.display()),
-        })?;
+    write_exclusive(&skill_md_path, content.as_bytes())?;
 
-    // 11. Write extra files if present.
+    // 10. Write extra files if present.
     let mut files = HashMap::new();
     files.insert("SKILL.md".to_string(), content);
 
@@ -212,7 +219,7 @@ pub fn build_skill(spec: &SkillSpec) -> Result<BuildResult> {
         }
     }
 
-    // 12. Validate output.
+    // 11. Validate output.
     let diags = validate(&output_dir);
     let errors: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
     if !errors.is_empty() {
@@ -234,7 +241,7 @@ pub fn build_skill(spec: &SkillSpec) -> Result<BuildResult> {
         });
     }
 
-    // 13. Return BuildResult.
+    // 12. Return BuildResult.
     Ok(BuildResult {
         properties,
         files,
@@ -300,25 +307,7 @@ pub fn init_skill(dir: &Path, tmpl: SkillTemplate) -> Result<PathBuf> {
 
         // Use atomic exclusive creation for SKILL.md to prevent TOCTOU races.
         if rel_path == "SKILL.md" {
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&full_path)
-                .map_err(|e| {
-                    if e.kind() == std::io::ErrorKind::AlreadyExists {
-                        AigentError::Build {
-                            message: format!("SKILL.md already exists: {}", full_path.display()),
-                        }
-                    } else {
-                        AigentError::Build {
-                            message: format!("cannot create {}: {e}", full_path.display()),
-                        }
-                    }
-                })?;
-            file.write_all(content.as_bytes())
-                .map_err(|e| AigentError::Build {
-                    message: format!("cannot write {}: {e}", full_path.display()),
-                })?;
+            write_exclusive(&full_path, content.as_bytes())?;
         } else {
             std::fs::write(&full_path, content)?;
         }
