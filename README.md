@@ -502,7 +502,7 @@ Create a skill from natural language.
 
 <table>
 <tr><th width="280">Flag</th><th>Description</th></tr>
-<tr><td><code>--dir &lt;directory&gt;</code></td><td>Output directory</td></tr>
+<tr><td><code>--dir &lt;dir&gt;</code></td><td>Output directory</td></tr>
 <tr><td><code>--interactive, -i</code></td><td>Step-by-step confirmation mode</td></tr>
 <tr><td><code>--name &lt;name&gt;</code></td><td>Override the derived skill name</td></tr>
 <tr><td><code>--no-llm</code></td><td>Force deterministic mode (no LLM)</td></tr>
@@ -515,7 +515,7 @@ Run fixture-based test suites from `tests.yml`.
 <table>
 <tr><th width="280">Flag</th><th>Description</th></tr>
 <tr><td><code>--format &lt;format&gt;</code></td><td>Output format: <code>text</code> or <code>json</code></td></tr>
-<tr><td><code>--generate</code></td><td>Generate a starter <code>tests.yml</code> for skills that lack one</td></tr>
+<tr><td><code>--generate</code></td><td>Generate a template <code>tests.yml</code> for skills that lack one</td></tr>
 <tr><td><code>--recursive</code></td><td>Discover skills recursively</td></tr>
 </table>
 
@@ -843,7 +843,7 @@ $ aigent new "Extract text from PDF files" --no-llm
 Created skill 'extracting-text-pdf-files' at extracting-text-pdf-files
 ```
 
-The generated `SKILL.md` includes derived name, description, and a starter body:
+The generated `SKILL.md` includes derived name, description, and a template body:
 
 ```markdown
 ---
@@ -908,7 +908,7 @@ Runs test suites defined in `tests.yml` files alongside skills. Each test
 case specifies an input query, whether it should match, and an optional
 minimum score threshold.
 
-Generate a starter `tests.yml`:
+Generate a template `tests.yml`:
 
 ```
 $ aigent test --generate my-skill/
@@ -1037,7 +1037,7 @@ Full Rust API documentation with examples is published at
 | `format_content(&str) -> Result<String>` | `formatter` | Format `SKILL.md` content string |
 | `assemble_plugin(&[&Path], &AssembleOptions) -> Result<AssembleResult>` | `assembler` | Assemble skills into a plugin |
 | `run_test_suite(&Path) -> Result<TestSuiteResult>` | `test_runner` | Run fixture-based test suite |
-| `generate_fixture(&Path) -> Result<String>` | `test_runner` | Generate starter `tests.yml` from skill metadata |
+| `generate_fixture(&Path) -> Result<String>` | `test_runner` | Generate template `tests.yml` from skill metadata |
 | `validate_structure(&Path) -> Vec<Diagnostic>` | `structure` | Validate directory structure |
 | `detect_conflicts(&[SkillEntry]) -> Vec<Diagnostic>` | `conflict` | Detect cross-skill conflicts |
 | `apply_fixes(&Path, &[Diagnostic]) -> Result<usize>` | `fixer` | Apply automatic fixes |
