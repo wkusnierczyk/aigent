@@ -880,6 +880,17 @@ $ aigent test --generate my-skill/
 Generated my-skill/tests.yml
 ```
 
+```yaml
+# Test fixture for my-skill
+# Run with: aigent test my-skill/
+queries:
+- input: process pdf files and extract text
+  should_match: true
+  min_score: 0.3
+- input: something completely unrelated to this skill
+  should_match: false
+```
+
 Run the test suite:
 
 ```
@@ -995,7 +1006,8 @@ cargo run --release --features watch -- validate --watch skills/
 cargo install aigent --features watch
 ```
 
-> **Note:** Cargo feature flags are per-invocation — they are not remembered
+> **Note**  
+> Cargo feature flags are per-invocation — they are not remembered
 > between builds. You must pass `--features watch` on every `cargo build` or
 > `cargo run` invocation. Building debug with `--features watch` does not
 > enable it for release builds, and vice versa.
@@ -1183,7 +1195,7 @@ time via `env!("CARGO_PKG_VERSION")`.
 
 ### Milestones
 
-**Status:** Implementation complete (M1–M13). In review.
+**Status:** Implementation complete (M1–M14). In review.
 
 Project tracked at
 [github.com/users/wkusnierczyk/projects/39](https://github.com/users/wkusnierczyk/projects/39).
@@ -1203,15 +1215,10 @@ Project tracked at
 | M11 | Builder and Prompt Enhancements | ✅ |
 | M12 | Ecosystem and Workflow | ✅ |
 | M13 | Enhancements | ✅ |
-| M14 | SRE Review | 🔲 |
+| M14 | SRE Review | ✅ |
 | M15 | Plugin Ecosystem Validation | 🔲 |
 
 ### Roadmap
-
-**M14: SRE Review** — security, reliability, and performance hardening prior
-to publication. Addresses symlink following, path traversal, uncapped file
-reads, silent error swallowing, TOCTOU races, and O(n²) conflict detection.
-10 issues ([#87](https://github.com/wkusnierczyk/aigent/issues/87)–[#96](https://github.com/wkusnierczyk/aigent/issues/96)).
 
 **M15: Plugin Ecosystem Validation** — extend `aigent`'s deterministic
 validation from `SKILL.md` to the full Claude Code plugin ecosystem.
@@ -1231,8 +1238,12 @@ See [dev/plugin-dev.md](dev/plugin-dev.md) for the full analysis.
 
 ### Continuous integration
 
-Every push to `main` and every pull request runs the CI pipeline on a
-**three-OS matrix** (Ubuntu, macOS, Windows):
+The `main` branch is protected: direct pushes are not allowed. Changes are
+merged via squash-merge of pull requests only, requiring green CI/CD and positive reviews.
+
+Every pull request runs the CI pipeline on a
+**three-OS, five-job matrix**
+(Linux x86_64, Linux aarch64, macOS x86_64, macOS aarch64, Windows x86_64):
 
 1. **Formatting** — `cargo fmt --check`
 2. **Linting** — `cargo clippy -- -D warnings`
