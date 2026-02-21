@@ -57,26 +57,19 @@ skill files so you can focus on writing the instructions rather than fighting th
     - [`upgrade` flags](#upgrade-flags)
     - [`validate` flags](#validate-flags)
   - [Command examples](#command-examples)
-    - [`validate` — Check skill directories for specification conformance](#validate--check-skill-directories-for-specification-conformance)
-    - [`check` — Validate + semantic quality checks](#check--validate--semantic-quality-checks)
-    - [`score` — Rate a skill 0–100](#score--rate-a-skill-0100)
-    - [`probe` — Simulate skill activation](#probe--simulate-skill-activation)
-    - [`upgrade` — Detect and apply best-practice improvements](#upgrade--detect-and-apply-best-practice-improvements)
-    - [`doc` — Generate a skill catalog](#doc--generate-a-skill-catalog)
-- [aigent-builder](#aigent-builder)
-- [aigent-scorer](#aigent-scorer)
-- [aigent-validator](#aigent-validator)
-    - [`properties` — Output skill metadata as JSON](#properties--output-skill-metadata-as-json)
-    - [`prompt` — Generate XML prompt block](#prompt--generate-xml-prompt-block)
-    - [`new` — Create a skill from natural language](#new--create-a-skill-from-natural-language)
-- [Quick start](#quick-start-1)
-- [Usage](#usage)
-    - [`format` — Format `SKILL.md` files](#format--format-skillmd-files)
     - [`build` — Assemble skills into a plugin](#build--assemble-skills-into-a-plugin)
-    - [`test` — Run fixture-based test suites](#test--run-fixture-based-test-suites)
+    - [`check` — Validate + semantic quality checks](#check--validate--semantic-quality-checks)
+    - [`doc` — Generate a skill catalog](#doc--generate-a-skill-catalog)
+    - [`format` — Format `SKILL.md` files](#format--format-skillmd-files)
     - [`init` — Create a template `SKILL.md`](#init--create-a-template-skillmd)
-- [Quick start](#quick-start-2)
-- [Usage](#usage-1)
+    - [`new` — Create a skill from natural language](#new--create-a-skill-from-natural-language)
+    - [`probe` — Simulate skill activation](#probe--simulate-skill-activation)
+    - [`prompt` — Generate XML prompt block](#prompt--generate-xml-prompt-block)
+    - [`properties` — Output skill metadata as JSON](#properties--output-skill-metadata-as-json)
+    - [`score` — Rate a skill 0–100](#score--rate-a-skill-0100)
+    - [`test` — Run fixture-based test suites](#test--run-fixture-based-test-suites)
+    - [`upgrade` — Detect and apply best-practice improvements](#upgrade--detect-and-apply-best-practice-improvements)
+    - [`validate` — Check skill directories for specification conformance](#validate--check-skill-directories-for-specification-conformance)
   - [Watch mode](#watch-mode)
   - [Global flags](#global-flags)
 - [API reference](#api-reference)
@@ -580,56 +573,29 @@ Validate skill directories against the specification.
 
 ### Command examples
 
-#### `validate` — Check skill directories for specification conformance
+#### `build` — Assemble skills into a plugin
 
-Validates one or more skill directories against the Anthropic specification.
-Exit code 0 means valid; non-zero means errors or warnings were found. For
-combined validation + semantic quality checks, use `check` instead.
-
-```
-$ aigent validate my-skill/
-(no output — skill is valid)
-```
-
-With `--structure` for directory layout checks:
+Packages one or more skill directories into a Claude Code plugin directory
+with a `plugin.json` manifest, `skills/` subdirectory, and scaffolded
+`agents/` and `hooks/` directories.
 
 ```
-$ aigent validate skills/aigent-validator --structure
-warning: unexpected metadata field: 'argument-hint'
+$ aigent build skills/aigent-validator skills/aigent-scorer --output ./dist
+Assembled 2 skill(s) into ./dist
 ```
 
-Multiple directories trigger cross-skill conflict detection automatically:
+The output structure:
 
 ```
-$ aigent validate skills/aigent-validator skills/aigent-builder skills/aigent-scorer
-skills/aigent-validator:
-  warning: unexpected metadata field: 'argument-hint'
-skills/aigent-builder:
-  warning: unexpected metadata field: 'argument-hint'
-  warning: unexpected metadata field: 'context'
-skills/aigent-scorer:
-  warning: unexpected metadata field: 'argument-hint'
-
-3 skills: 0 ok, 0 errors, 3 warnings only
-```
-
-JSON output for CI integration:
-
-```
-$ aigent validate skills/aigent-validator --format json
-[
-  {
-    "diagnostics": [
-      {
-        "code": "W001",
-        "field": "metadata",
-        "message": "unexpected metadata field: 'argument-hint'",
-        "severity": "warning"
-      }
-    ],
-    "path": "skills/aigent-validator"
-  }
-]
+dist/
+├── plugin.json
+├── skills/
+│   ├── aigent-validator/
+│   │   └── SKILL.md
+│   └── aigent-scorer/
+│       └── SKILL.md
+├── agents/
+└── hooks/
 ```
 
 #### `check` — Validate + semantic quality checks
@@ -639,17 +605,200 @@ third-person descriptions, trigger phrases, gerund name forms, generic
 names, and description detail. Use `--no-validate` to skip specification checks
 and run semantic lint only.
 
+Diagnostics use three severity levels:
+- **error** — specification violation (causes exit 1)
+- **warning** — specification conformance issue (causes exit 1)
+- **info** — quality suggestion from semantic lint (does not affect exit code)
+
 ```
 $ aigent check skills/aigent-validator
 warning: unexpected metadata field: 'argument-hint'
 info: name does not use gerund form
 ```
 
-Semantic lint only (equivalent to the old `lint` command):
+Semantic lint only:
 
 ```
 $ aigent check --no-validate skills/aigent-validator
 info: name does not use gerund form
+```
+
+#### `doc` — Generate a skill catalog
+
+Produces a markdown catalog of skills. Use `--recursive` to discover skills
+in subdirectories, and `--output` to write to a file (diff-aware — only
+writes if content changed).
+
+```
+$ aigent doc skills --recursive
+# Skill Catalog
+
+## aigent-builder
+> Generates AI agent skill definitions (SKILL.md files) from natural
+> language descriptions. ...
+**Location**: `skills/aigent-builder/SKILL.md`
+
+---
+
+## aigent-scorer
+> Scores AI agent skill definitions (SKILL.md files) against the Anthropic
+> best-practices checklist. ...
+**Location**: `skills/aigent-scorer/SKILL.md`
+
+---
+
+## aigent-validator
+> Validates AI agent skill definitions (SKILL.md files) against the
+> Anthropic agent skill specification. ...
+**Location**: `skills/aigent-validator/SKILL.md`
+
+---
+```
+
+```
+$ aigent doc skills --recursive --output catalog.md
+(writes catalog.md; re-running skips write if content unchanged)
+```
+
+#### `format` — Format `SKILL.md` files
+
+Normalizes `SKILL.md` files with canonical YAML key ordering, consistent
+whitespace, and clean formatting. The operation is idempotent — running
+it twice produces no further changes.
+
+```
+$ aigent format my-skill/
+Formatted my-skill/
+```
+
+Check mode reports which files would change without modifying them:
+
+```
+$ aigent format --check my-skill/
+Would reformat: my-skill/
+```
+
+#### `init` — Create a template `SKILL.md`
+
+Scaffolds a skill directory with a template `SKILL.md` ready for editing.
+
+```
+$ aigent init my-skill
+Created my-skill/SKILL.md
+```
+
+```
+$ cat my-skill/SKILL.md
+---
+name: my-skill
+description: Describe what this skill does and when to use it
+---
+
+# My Skill
+
+## Quick start
+[Add quick start instructions here]
+
+## Usage
+[Add detailed usage instructions here]
+```
+
+#### `new` — Create a skill from natural language
+
+Creates a complete skill directory with `SKILL.md` from a purpose description.
+Uses LLM when an API key is available, or `--no-llm` for deterministic mode.
+
+```
+$ aigent new "Extract text from PDF files" --no-llm
+Created skill 'extracting-text-pdf-files' at extracting-text-pdf-files
+```
+
+The generated `SKILL.md` includes derived name, description, and a template body:
+
+```markdown
+---
+name: extracting-text-pdf-files
+description: Extract text from PDF files. Use when working with files.
+---
+# Extracting Text Pdf Files
+
+## Quick start
+Extract text from PDF files
+
+## Usage
+Use this skill to Extract text from PDF files.
+```
+
+#### `probe` — Simulate skill activation
+
+Probes whether a skill's description would activate for a given user query.
+This is a dry-run of skill discovery — "if a user said *this*, would Claude
+pick up *that* skill?"
+
+Uses a **weighted formula** to compute a match score (0.0–1.0):
+- **0.5 × description overlap** — fraction of query tokens in description
+- **0.3 × trigger score** — match against trigger phrases ("Use when...")
+- **0.2 × name score** — query-to-name token overlap
+
+Categories based on weighted score:
+- **Strong** (≥ 0.4) — skill would reliably activate
+- **Weak** (≥ 0.15) — might activate, but description could be improved
+- **None** (< 0.15) — skill would not activate for this query
+
+Also reports estimated token cost and any validation issues.
+
+```
+$ aigent probe skills/aigent-validator "validate a skill"
+Skill: aigent-validator
+Query: "validate a skill"
+Description: Validates AI agent skill definitions (SKILL.md files) against
+the Anthropic agent skill specification. ...
+
+Activation: STRONG ✓ — description aligns well with query (score: 0.65)
+Token footprint: ~76 tokens
+
+Validation warnings (1):
+  warning: unexpected metadata field: 'argument-hint'
+```
+
+```
+$ aigent probe skills/aigent-validator "deploy kubernetes"
+...
+Activation: NONE ✗ — description does not match the test query (score: 0.00)
+Token footprint: ~76 tokens
+```
+
+#### `prompt` — Generate XML prompt block
+
+Generates the `<available_skills>` XML block that gets injected into Claude's
+system prompt. Accepts multiple skill directories.
+
+```
+$ aigent prompt skills/aigent-validator
+<available_skills>
+  <skill>
+    <name>aigent-validator</name>
+    <description>Validates AI agent skill definitions ...</description>
+    <location>skills/aigent-validator/SKILL.md</location>
+  </skill>
+</available_skills>
+```
+
+#### `properties` — Output skill metadata as JSON
+
+Parses the `SKILL.md` frontmatter and outputs structured JSON. Useful for
+scripting and integration with other tools.
+
+```
+$ aigent properties skills/aigent-validator
+{
+  "name": "aigent-validator",
+  "description": "Validates AI agent skill definitions ...",
+  "allowed-tools": "Bash(aigent validate *), Bash(command -v *), Read, Glob",
+  "metadata": {
+    "argument-hint": "[skill-directory-or-file]"
+  }
+}
 ```
 
 #### `score` — Rate a skill 0–100
@@ -718,43 +867,27 @@ Quality (32/40):
   [PASS] Detailed description
 ```
 
-#### `probe` — Simulate skill activation
+#### `test` — Run fixture-based test suites
 
-Probes whether a skill's description would activate for a given user query.
-This is a dry-run of skill discovery — "if a user said *this*, would Claude
-pick up *that* skill?"
+Runs test suites defined in `tests.yml` files alongside skills. Each test
+case specifies an input query, whether it should match, and an optional
+minimum score threshold.
 
-Uses a **weighted formula** to compute a match score (0.0–1.0):
-- **0.5 × description overlap** — fraction of query tokens in description
-- **0.3 × trigger score** — match against trigger phrases ("Use when...")
-- **0.2 × name score** — query-to-name token overlap
-
-Categories based on weighted score:
-- **Strong** (≥ 0.4) — skill would reliably activate
-- **Weak** (≥ 0.15) — might activate, but description could be improved
-- **None** (< 0.15) — skill would not activate for this query
-
-Also reports estimated token cost and any validation issues.
+Generate a template `tests.yml`:
 
 ```
-$ aigent probe skills/aigent-validator "validate a skill"
-Skill: aigent-validator
-Query: "validate a skill"
-Description: Validates AI agent skill definitions (SKILL.md files) against
-the Anthropic agent skill specification. ...
-
-Activation: STRONG ✓ — description aligns well with query (score: 0.65)
-Token footprint: ~76 tokens
-
-Validation warnings (1):
-  warning: unexpected metadata field: 'argument-hint'
+$ aigent test --generate my-skill/
+Generated my-skill/tests.yml
 ```
 
+Run the test suite:
+
 ```
-$ aigent probe skills/aigent-validator "deploy kubernetes"
-...
-Activation: NONE ✗ — description does not match the test query (score: 0.00)
-Token footprint: ~76 tokens
+$ aigent test my-skill/
+[PASS] "process pdf files" (score: 0.65)
+[PASS] "something completely unrelated to this skill" (score: 0.00)
+
+2 passed, 0 failed, 2 total
 ```
 
 #### `upgrade` — Detect and apply best-practice improvements
@@ -786,191 +919,56 @@ $ aigent upgrade --full --apply skills/aigent-validator
 Missing 'compatibility' field — recommended for multi-platform skills.
 ```
 
-#### `doc` — Generate a skill catalog
+#### `validate` — Check skill directories for specification conformance
 
-Produces a markdown catalog of skills. Use `--recursive` to discover skills
-in subdirectories, and `--output` to write to a file (diff-aware — only
-writes if content changed).
-
-```
-$ aigent doc skills --recursive
-# Skill Catalog
-
-## aigent-builder
-> Generates AI agent skill definitions (SKILL.md files) from natural
-> language descriptions. ...
-**Location**: `skills/aigent-builder/SKILL.md`
-
----
-
-## aigent-scorer
-> Scores AI agent skill definitions (SKILL.md files) against the Anthropic
-> best-practices checklist. ...
-**Location**: `skills/aigent-scorer/SKILL.md`
-
----
-
-## aigent-validator
-> Validates AI agent skill definitions (SKILL.md files) against the
-> Anthropic agent skill specification. ...
-**Location**: `skills/aigent-validator/SKILL.md`
-
----
-```
+Validates one or more skill directories against the Anthropic specification.
+Exit code 0 means valid; non-zero means errors or warnings were found. For
+combined validation + semantic quality checks, use `check` instead.
 
 ```
-$ aigent doc skills --recursive --output catalog.md
-(writes catalog.md; re-running skips write if content unchanged)
+$ aigent validate my-skill/
+(no output — skill is valid)
 ```
 
-#### `properties` — Output skill metadata as JSON
-
-Parses the `SKILL.md` frontmatter and outputs structured JSON. Useful for
-scripting and integration with other tools.
+With `--structure` for directory layout checks:
 
 ```
-$ aigent properties skills/aigent-validator
-{
-  "name": "aigent-validator",
-  "description": "Validates AI agent skill definitions ...",
-  "allowed-tools": "Bash(aigent validate *), Bash(command -v *), Read, Glob",
-  "metadata": {
-    "argument-hint": "[skill-directory-or-file]"
+$ aigent validate skills/aigent-validator --structure
+warning: unexpected metadata field: 'argument-hint'
+```
+
+Multiple directories trigger cross-skill conflict detection automatically:
+
+```
+$ aigent validate skills/aigent-validator skills/aigent-builder skills/aigent-scorer
+skills/aigent-validator:
+  warning: unexpected metadata field: 'argument-hint'
+skills/aigent-builder:
+  warning: unexpected metadata field: 'argument-hint'
+  warning: unexpected metadata field: 'context'
+skills/aigent-scorer:
+  warning: unexpected metadata field: 'argument-hint'
+
+3 skills: 0 ok, 0 errors, 3 warnings only
+```
+
+JSON output for CI integration:
+
+```
+$ aigent validate skills/aigent-validator --format json
+[
+  {
+    "diagnostics": [
+      {
+        "code": "W001",
+        "field": "metadata",
+        "message": "unexpected metadata field: 'argument-hint'",
+        "severity": "warning"
+      }
+    ],
+    "path": "skills/aigent-validator"
   }
-}
-```
-
-#### `prompt` — Generate XML prompt block
-
-Generates the `<available_skills>` XML block that gets injected into Claude's
-system prompt. Accepts multiple skill directories.
-
-```
-$ aigent prompt skills/aigent-validator
-<available_skills>
-  <skill>
-    <name>aigent-validator</name>
-    <description>Validates AI agent skill definitions ...</description>
-    <location>skills/aigent-validator/SKILL.md</location>
-  </skill>
-</available_skills>
-```
-
-#### `new` — Create a skill from natural language
-
-Creates a complete skill directory with `SKILL.md` from a purpose description.
-Uses LLM when an API key is available, or `--no-llm` for deterministic mode.
-
-```
-$ aigent new "Extract text from PDF files" --no-llm
-Created skill 'extracting-text-pdf-files' at extracting-text-pdf-files
-```
-
-The generated `SKILL.md` includes derived name, description, and a template body:
-
-```markdown
----
-name: extracting-text-pdf-files
-description: Extract text from PDF files. Use when working with files.
----
-# Extracting Text Pdf Files
-
-## Quick start
-Extract text from PDF files
-
-## Usage
-Use this skill to Extract text from PDF files.
-```
-
-#### `format` — Format `SKILL.md` files
-
-Normalizes `SKILL.md` files with canonical YAML key ordering, consistent
-whitespace, and clean formatting. The operation is idempotent — running
-it twice produces no further changes.
-
-```
-$ aigent format my-skill/
-Formatted my-skill/
-```
-
-Check mode reports which files would change without modifying them:
-
-```
-$ aigent format --check my-skill/
-Would reformat: my-skill/
-```
-
-#### `build` — Assemble skills into a plugin
-
-Packages one or more skill directories into a Claude Code plugin directory
-with a `plugin.json` manifest, `skills/` subdirectory, and scaffolded
-`agents/` and `hooks/` directories.
-
-```
-$ aigent build skills/aigent-validator skills/aigent-scorer --output ./dist
-Assembled 2 skill(s) into ./dist
-```
-
-The output structure:
-
-```
-dist/
-├── plugin.json
-├── skills/
-│   ├── aigent-validator/
-│   │   └── SKILL.md
-│   └── aigent-scorer/
-│       └── SKILL.md
-├── agents/
-└── hooks/
-```
-
-#### `test` — Run fixture-based test suites
-
-Runs test suites defined in `tests.yml` files alongside skills. Each test
-case specifies an input query, whether it should match, and an optional
-minimum score threshold.
-
-Generate a template `tests.yml`:
-
-```
-$ aigent test --generate my-skill/
-Generated my-skill/tests.yml
-```
-
-Run the test suite:
-
-```
-$ aigent test my-skill/
-[PASS] "process pdf files" (score: 0.65)
-[PASS] "something completely unrelated to this skill" (score: 0.00)
-
-2 passed, 0 failed, 2 total
-```
-
-#### `init` — Create a template SKILL.md
-
-Scaffolds a skill directory with a template `SKILL.md` ready for editing.
-
-```
-$ aigent init my-skill
-Created my-skill/SKILL.md
-```
-
-```
-$ cat my-skill/SKILL.md
----
-name: my-skill
-description: Describe what this skill does and when to use it
----
-
-# My Skill
-
-## Quick start
-[Add quick start instructions here]
-
-## Usage
-[Add detailed usage instructions here]
+]
 ```
 
 ### Watch mode
