@@ -11,7 +11,9 @@ use crate::diagnostics::{
     E010, E011, E012, E013, E014, E015, E016, E017, E018, W001, W002,
 };
 use crate::fs_util::{is_regular_dir, is_regular_file};
-use crate::parser::{find_skill_md, parse_frontmatter, CLAUDE_CODE_KEYS, KNOWN_KEYS};
+use crate::parser::{
+    find_skill_md, parse_frontmatter, read_file_checked, CLAUDE_CODE_KEYS, KNOWN_KEYS,
+};
 
 /// Reserved words that must not appear as hyphen-delimited segments in a skill name.
 const RESERVED_WORDS: &[&str] = &["anthropic", "claude"];
@@ -351,16 +353,10 @@ pub fn validate_with_target(dir: &Path, target: ValidationTarget) -> Vec<Diagnos
         None => return vec![Diagnostic::new(Severity::Error, E000, "SKILL.md not found")],
     };
 
-    // 2. Read the file.
-    let content = match std::fs::read_to_string(&path) {
+    // 2. Read the file (with size check).
+    let content = match read_file_checked(&path) {
         Ok(c) => c,
-        Err(e) => {
-            return vec![Diagnostic::new(
-                Severity::Error,
-                E000,
-                format!("IO error: {e}"),
-            )]
-        }
+        Err(e) => return vec![Diagnostic::new(Severity::Error, E000, e.to_string())],
     };
 
     // 3. Parse frontmatter.

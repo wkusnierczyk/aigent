@@ -7,6 +7,26 @@ use crate::errors::{AigentError, Result};
 use crate::fs_util::is_regular_file;
 use crate::models::SkillProperties;
 
+/// Maximum file size for SKILL.md and related files (1 MiB).
+const MAX_FILE_SIZE: u64 = 1_048_576;
+
+/// Reads a file with a size check, returning an error if the file exceeds 1 MiB.
+///
+/// This prevents memory exhaustion from maliciously large files.
+pub(crate) fn read_file_checked(path: &Path) -> Result<String> {
+    let metadata = std::fs::metadata(path).map_err(|e| AigentError::Parse {
+        message: format!("cannot read {}: {e}", path.display()),
+    })?;
+    if metadata.len() > MAX_FILE_SIZE {
+        return Err(AigentError::Parse {
+            message: format!("file exceeds 1 MiB size limit: {}", path.display()),
+        });
+    }
+    std::fs::read_to_string(path).map_err(|e| AigentError::Parse {
+        message: format!("cannot read {}: {e}", path.display()),
+    })
+}
+
 /// Locate SKILL.md in a directory (prefer uppercase over lowercase).
 #[must_use]
 pub fn find_skill_md(dir: &Path) -> Option<PathBuf> {
@@ -207,8 +227,8 @@ pub fn read_properties(dir: &Path) -> Result<SkillProperties> {
         message: "SKILL.md not found in directory".to_string(),
     })?;
 
-    // Step 2: Read file (IO errors propagate via #[from]).
-    let content = std::fs::read_to_string(&path)?;
+    // Step 2: Read file with size check.
+    let content = read_file_checked(&path)?;
 
     // Step 3: Parse frontmatter.
     let (mut metadata, _body) = parse_frontmatter(&content)?;
@@ -256,7 +276,7 @@ pub fn read_body(dir: &Path) -> String {
         Some(p) => p,
         None => return String::new(),
     };
-    let content = match std::fs::read_to_string(&path) {
+    let content = match read_file_checked(&path) {
         Ok(c) => c,
         Err(_) => return String::new(),
     };
@@ -540,5 +560,53 @@ custom-key: value
         let dir = write_skill_md(content);
         let props = read_properties(dir.path()).unwrap();
         assert!(props.metadata.is_none());
+    }
+
+    // ── read_file_checked tests ───────────────────────────────────────
+
+    #[test]
+    fn read_file_checked_succeeds_for_normal_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("normal.md");
+        fs::write(&path, "hello world").unwrap();
+        let content = read_file_checked(&path).unwrap();
+        assert_eq!(content, "hello world");
+    }
+
+    #[test]
+    fn read_file_checked_rejects_oversized_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("huge.md");
+        // Create a file that exceeds 1 MiB (1_048_576 bytes).
+        let data = vec![b'x'; 1_048_577];
+        fs::write(&path, &data).unwrap();
+        let err = read_file_checked(&path).unwrap_err();
+        assert!(matches!(err, AigentError::Parse { .. }));
+        assert!(
+            err.to_string().contains("file exceeds 1 MiB size limit"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[test]
+    fn read_file_checked_allows_exactly_1mib() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("exact.md");
+        let data = vec![b'x'; 1_048_576];
+        fs::write(&path, &data).unwrap();
+        // Exactly 1 MiB should succeed (the check is >, not >=).
+        let result = read_file_checked(&path);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn read_file_checked_returns_error_for_nonexistent_file() {
+        let path = std::path::Path::new("/nonexistent/path/that/does/not/exist.md");
+        let err = read_file_checked(path).unwrap_err();
+        assert!(matches!(err, AigentError::Parse { .. }));
+        assert!(
+            err.to_string().contains("cannot read"),
+            "unexpected error message: {err}"
+        );
     }
 }

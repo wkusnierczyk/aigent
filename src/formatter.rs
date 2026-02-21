@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use crate::errors::{AigentError, Result};
-use crate::parser::find_skill_md;
+use crate::parser::{find_skill_md, read_file_checked};
 
 /// Result of formatting a single skill.
 #[derive(Debug)]
@@ -46,7 +46,7 @@ pub fn format_skill(dir: &Path) -> Result<FormatResult> {
     let path = find_skill_md(dir).ok_or_else(|| AigentError::Parse {
         message: "no SKILL.md found".into(),
     })?;
-    let original = std::fs::read_to_string(&path)?;
+    let original = read_file_checked(&path)?;
 
     let content = format_content(&original)?;
     let changed = content != original;
