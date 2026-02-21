@@ -475,10 +475,10 @@ fn discover_skills_recursive_verbose(
             Ok(entry) => {
                 let path = entry.path();
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if path.is_file() && (name == "SKILL.md" || name == "skill.md") {
+                    if is_regular_file(&path) && (name == "SKILL.md" || name == "skill.md") {
                         has_skill_md = true;
                     }
-                    if path.is_dir() && !name.starts_with('.') {
+                    if is_regular_dir(&path) && !name.starts_with('.') {
                         subdirs.push(path);
                     }
                 }
