@@ -47,6 +47,7 @@ skill files so you can focus on writing the instructions rather than fighting th
   - [Extras](#extras)
 - [CLI reference](#cli-reference)
   - [Commands](#commands)
+  - [Exit codes](#exit-codes)
   - [Command flags](#command-flags)
     - [`build` (assembly) flags](#build-assembly-flags)
     - [`check` flags](#check-flags)
@@ -445,7 +446,7 @@ Full API documentation is available at [docs.rs/aigent](https://docs.rs/aigent).
 <tr><td><code>score &lt;directory&gt;</code></td><td>Score a skill against best-practices checklist (0–100)</td></tr>
 <tr><td><code>test &lt;dirs...&gt;</code></td><td>Run fixture-based test suites from <code>tests.yml</code></td></tr>
 <tr><td><code>upgrade &lt;directory&gt;</code></td><td>Check a skill for upgrade opportunities</td></tr>
-<tr><td><code>validate &lt;dirs...&gt;</code></td><td>Validate skill directories against the specification; exit 0 if valid</td></tr>
+<tr><td><code>validate &lt;dirs...&gt;</code></td><td>Validate skill directories against the specification</td></tr>
 </table>
 
 > **Note**
@@ -458,6 +459,27 @@ Full API documentation is available at [docs.rs/aigent](https://docs.rs/aigent).
 > | `to-prompt` | `prompt` |
 > | `create` | `new` |
 > | `test <dir> <query>` | `probe` |
+
+### Exit codes
+
+All commands exit 0 on success and 1 on failure. The table below clarifies
+what "success" means for each command.
+
+| Command | Exit 0 | Exit 1 |
+|---------|--------|--------|
+| `build` | Plugin assembled successfully | Assembly error |
+| `check` | No errors or warnings | Errors or warnings found |
+| `doc` | Catalog generated | I/O error |
+| `format` | All files already formatted | Files were reformatted (with `--check`) or error |
+| `init` | Template created | Directory already exists or I/O error |
+| `new` | Skill created | Build error |
+| `probe` | Always (result printed) | Parse or I/O error |
+| `prompt` | Prompt generated | No valid skills found |
+| `properties` | Properties printed | Parse error |
+| `score` | Perfect score (100/100) | Score below 100 |
+| `test` | All test cases pass | Any test case fails |
+| `upgrade` | No suggestions, or applied successfully | Unapplied suggestions remain, or error |
+| `validate` | No errors or warnings | Errors or warnings found |
 
 ### Command flags
 
@@ -532,7 +554,7 @@ Check a skill for upgrade opportunities.
 
 #### `validate` flags
 
-Validate skill directories against the specification; exit 0 if valid.
+Validate skill directories against the specification.
 
 <table>
 <tr><th width="280">Flag</th><th>Description</th></tr>
@@ -552,7 +574,8 @@ Validate skill directories against the specification; exit 0 if valid.
 | `claude-code` | Standard fields plus Claude Code extension fields (e.g., `argument-hint`, `context`) |
 | `permissive` | No unknown-field warnings; all fields accepted |
 
-> **Note:** Semantic lint checks are available with `check`.
+> **Note**  
+> Semantic lint checks are available with `check`.  
 > Use `aigent check` for combined validation + linting, or `aigent check --no-validate` for lint-only.
 
 ### Command examples
