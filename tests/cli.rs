@@ -1251,6 +1251,37 @@ fn upgrade_apply_modifies_skill() {
     assert!(content.contains("compatibility"));
 }
 
+#[test]
+fn upgrade_full_reports_suggestions() {
+    let (_parent, dir) = make_skill_dir(
+        "upgrade-full-test",
+        "---\nname: upgrade-full-test\ndescription: A basic skill\n---\nBody.\n",
+    );
+    // Without --apply, exits 1 when suggestions exist (same as upgrade without --full).
+    aigent()
+        .args(["upgrade", dir.to_str().unwrap(), "--full"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("compatibility"))
+        .stderr(predicate::str::contains("metadata"));
+}
+
+#[test]
+fn upgrade_full_apply_fixes_then_upgrades() {
+    let (_parent, dir) = make_skill_dir(
+        "upgrade-full-apply",
+        "---\nname: upgrade-full-apply\ndescription: A basic skill\n---\nBody.\n",
+    );
+    aigent()
+        .args(["upgrade", dir.to_str().unwrap(), "--full", "--apply"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Applied"));
+    // Verify the file was updated.
+    let content = fs::read_to_string(dir.join("SKILL.md")).unwrap();
+    assert!(content.contains("compatibility"));
+}
+
 // ── M12: watch mode (no-feature build) ───────────────────────────
 
 #[test]

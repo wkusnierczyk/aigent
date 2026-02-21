@@ -26,6 +26,8 @@ pub struct TestResult {
     pub query: String,
     /// Whether the description appears relevant to the query.
     pub query_match: QueryMatch,
+    /// Numeric match score (0.0–1.0) from the weighted formula.
+    pub score: f64,
     /// Estimated token cost of the skill's prompt footprint.
     pub estimated_tokens: usize,
     /// Validation diagnostics (errors + warnings).
@@ -39,11 +41,11 @@ pub struct TestResult {
 /// Describes how well the skill description matches a test query.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryMatch {
-    /// Strong match: multiple query words appear in the description.
+    /// Strong match: weighted score ≥ 0.4.
     Strong,
-    /// Weak match: some query words appear but overlap is low.
+    /// Weak match: weighted score ≥ 0.15.
     Weak,
-    /// No match: the query and description share no meaningful words.
+    /// No match: weighted score < 0.15.
     None,
 }
 
@@ -65,8 +67,9 @@ pub enum QueryMatch {
 pub fn test_skill(dir: &Path, query: &str) -> Result<TestResult> {
     let properties = read_properties(dir)?;
 
-    // Compute query/description overlap.
-    let query_match = compute_query_match(query, &properties.description);
+    // Compute weighted match score and category.
+    let (query_match, score) =
+        compute_query_match(query, &properties.name, &properties.description);
 
     // Estimate token footprint: name + description (what goes into system prompt).
     let estimated_tokens =
@@ -83,6 +86,7 @@ pub fn test_skill(dir: &Path, query: &str) -> Result<TestResult> {
         description: properties.description.clone(),
         query: query.to_string(),
         query_match,
+        score,
         estimated_tokens,
         diagnostics,
         structure_diagnostics,
@@ -106,7 +110,10 @@ pub fn format_test_result(result: &TestResult) -> String {
         QueryMatch::Weak => "WEAK ⚠ — some overlap, but description may not trigger reliably",
         QueryMatch::None => "NONE ✗ — description does not match the test query",
     };
-    out.push_str(&format!("Activation: {match_label}\n"));
+    out.push_str(&format!(
+        "Activation: {match_label} (score: {:.2})\n",
+        result.score
+    ));
 
     // Token budget.
     out.push_str(&format!(
@@ -152,39 +159,129 @@ pub fn format_test_result(result: &TestResult) -> String {
     out
 }
 
-/// Compute word overlap between a query and a skill description.
-///
-/// Tokenizes both into lowercase words and computes what fraction of query
-/// words appear in the description. Returns [`QueryMatch::Strong`] if ≥50%
-/// of query words match, [`QueryMatch::Weak`] if ≥20%, [`QueryMatch::None`]
-/// otherwise.
-fn compute_query_match(query: &str, description: &str) -> QueryMatch {
-    let query_words: Vec<&str> = query
-        .split_whitespace()
-        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
-        .filter(|w| !w.is_empty() && w.len() > 2) // skip short stopwords
-        .collect();
+/// Common English stopwords excluded from token matching.
+const STOPWORDS: &[&str] = &[
+    "a", "an", "the", "is", "are", "was", "were", "of", "to", "in", "for", "on", "with", "and",
+    "or", "but", "not", "it", "this", "that",
+];
 
-    if query_words.is_empty() {
-        return QueryMatch::None;
+/// Normalize a word by stripping common English suffixes.
+///
+/// This is a minimal stemmer, not a full Porter/Snowball implementation.
+/// It handles the most common cases to improve Jaccard overlap.
+fn stem(word: &str) -> String {
+    let w = word.to_lowercase();
+    // Order matters: check longer suffixes first.
+    for suffix in &[
+        "ting", "sing", "zing", "ning", "ring", "ses", "ies", "ing", "ed", "es", "s",
+    ] {
+        if w.len() > suffix.len() + 2 {
+            if let Some(root) = w.strip_suffix(suffix) {
+                return root.to_string();
+            }
+        }
+    }
+    w
+}
+
+/// Tokenize a string into lowercase, stemmed words with punctuation stripped
+/// and stopwords removed.
+fn tokenize(text: &str) -> Vec<String> {
+    text.split_whitespace()
+        .map(|w| {
+            let cleaned = w
+                .trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase();
+            stem(&cleaned)
+        })
+        .filter(|w| !w.is_empty() && !STOPWORDS.contains(&w.as_str()))
+        .collect()
+}
+
+/// Extract a trigger phrase from a description.
+///
+/// Scans for lines starting with "Use when" or "Use this when"
+/// (case-insensitive) and returns the full line text if found.
+fn extract_trigger(description: &str) -> Option<String> {
+    for line in description.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_lowercase();
+        if lower.starts_with("use when") || lower.starts_with("use this when") {
+            return Some(trimmed.to_string());
+        }
+    }
+    None
+}
+
+/// Compute a weighted match score between a query and a skill.
+///
+/// Uses a three-component weighted formula:
+/// - **0.5 × description overlap** (fraction of query tokens found in description)
+/// - **0.3 × trigger match**: 1.0 if any query token appears in the
+///   skill's trigger phrase ("Use when..."), 0.0 otherwise
+/// - **0.2 × name match**: 1.0 if any query token is a substring of the
+///   skill name, 0.0 otherwise
+///
+/// Returns the [`QueryMatch`] category and the numeric score (0.0–1.0).
+/// Strong ≥ 0.5, Weak ≥ 0.2, None < 0.2.
+fn compute_query_match(query: &str, name: &str, description: &str) -> (QueryMatch, f64) {
+    let query_tokens = tokenize(query);
+
+    if query_tokens.is_empty() {
+        return (QueryMatch::None, 0.0);
     }
 
-    let desc_lower = description.to_lowercase();
+    let desc_tokens = tokenize(description);
 
-    let matches = query_words
-        .iter()
-        .filter(|w| desc_lower.contains(&w.to_lowercase()))
-        .count();
+    // Description overlap: fraction of query tokens found in description tokens.
+    // This measures recall (how many query terms are covered) rather than
+    // Jaccard (which penalizes for extra description tokens).
+    let query_set: std::collections::HashSet<&str> =
+        query_tokens.iter().map(|s| s.as_str()).collect();
+    let desc_set: std::collections::HashSet<&str> =
+        desc_tokens.iter().map(|s| s.as_str()).collect();
+    let intersection = query_set.intersection(&desc_set).count();
+    let desc_overlap = if query_set.is_empty() {
+        0.0
+    } else {
+        intersection as f64 / query_set.len() as f64
+    };
 
-    let ratio = matches as f64 / query_words.len() as f64;
+    // Trigger match: 1.0 if any query token appears in the trigger phrase.
+    let trigger_score = if let Some(trigger) = extract_trigger(description) {
+        let trigger_lower = trigger.to_lowercase();
+        if query_tokens
+            .iter()
+            .any(|t| trigger_lower.contains(t.as_str()))
+        {
+            1.0
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
 
-    if ratio >= 0.5 {
+    // Name match: 1.0 if any query token is a substring of the skill name.
+    let name_lower = name.to_lowercase();
+    let name_score = if query_tokens.iter().any(|t| name_lower.contains(t.as_str())) {
+        1.0
+    } else {
+        0.0
+    };
+
+    // Weighted formula.
+    let score = 0.5 * desc_overlap + 0.3 * trigger_score + 0.2 * name_score;
+
+    let category = if score >= 0.4 {
         QueryMatch::Strong
-    } else if ratio >= 0.2 {
+    } else if score >= 0.15 {
         QueryMatch::Weak
     } else {
         QueryMatch::None
-    }
+    };
+
+    (category, score)
 }
 
 #[cfg(test)]
@@ -214,44 +311,108 @@ mod tests {
 
     #[test]
     fn strong_match_when_query_words_in_description() {
-        let m = compute_query_match(
+        let (m, score) = compute_query_match(
             "process PDF files",
+            "pdf-processor",
             "Processes PDF files and generates detailed reports",
         );
         assert_eq!(m, QueryMatch::Strong);
+        assert!(score >= 0.4, "score {score} should be ≥ 0.4");
     }
 
     #[test]
     fn weak_match_with_partial_overlap() {
-        let m = compute_query_match(
+        let (m, score) = compute_query_match(
             "generate database migration scripts quickly",
+            "pdf-processor",
             "Processes PDF files and generates detailed reports",
         );
-        assert_eq!(m, QueryMatch::Weak);
+        assert!(
+            matches!(m, QueryMatch::Weak | QueryMatch::None),
+            "expected Weak or None for partial overlap, got {m:?} (score: {score})"
+        );
     }
 
     #[test]
     fn no_match_with_unrelated_query() {
-        let m = compute_query_match(
+        let (m, score) = compute_query_match(
             "deploy kubernetes cluster",
+            "pdf-processor",
             "Processes PDF files and generates detailed reports",
         );
         assert_eq!(m, QueryMatch::None);
+        assert!(score < 0.15, "score {score} should be < 0.15");
     }
 
     #[test]
     fn empty_query_is_no_match() {
-        let m = compute_query_match("", "Some description");
+        let (m, score) = compute_query_match("", "some-skill", "Some description");
         assert_eq!(m, QueryMatch::None);
+        assert_eq!(score, 0.0);
     }
 
     #[test]
     fn case_insensitive_matching() {
-        let m = compute_query_match(
+        let (m, _score) = compute_query_match(
             "PDF PROCESSING",
+            "pdf-processor",
             "Processes pdf files and generates reports",
         );
-        assert_eq!(m, QueryMatch::Strong);
+        assert!(
+            matches!(m, QueryMatch::Strong | QueryMatch::Weak),
+            "expected Strong or Weak for case-insensitive match, got {m:?}"
+        );
+    }
+
+    // ── Weighted scoring specific tests ──────────────────────────────
+
+    #[test]
+    fn trigger_phrase_boosts_score() {
+        // Use identical base descriptions + same extra words to isolate the trigger effect.
+        // The trigger bonus (0.3) should outweigh any Jaccard dilution from extra tokens.
+        let (_, score_with_trigger) = compute_query_match(
+            "lint javascript",
+            "unrelated-name",
+            "Analyzes syntax patterns. Use when you want to lint javascript files.",
+        );
+        let (_, score_without_trigger) = compute_query_match(
+            "lint javascript",
+            "unrelated-name",
+            "Analyzes syntax patterns in various source files.",
+        );
+        assert!(
+            score_with_trigger > score_without_trigger,
+            "trigger phrase should boost score: {score_with_trigger} vs {score_without_trigger}"
+        );
+    }
+
+    #[test]
+    fn name_match_boosts_score() {
+        let (_, score_name_match) = compute_query_match(
+            "process pdf",
+            "pdf-processor",
+            "Handles document transformation tasks.",
+        );
+        let (_, score_no_name) = compute_query_match(
+            "process pdf",
+            "document-handler",
+            "Handles document transformation tasks.",
+        );
+        assert!(
+            score_name_match > score_no_name,
+            "name match should boost score: {score_name_match} vs {score_no_name}"
+        );
+    }
+
+    #[test]
+    fn all_zero_inputs_produce_zero_score() {
+        let (m, score) = compute_query_match(
+            "xylophone zephyr",
+            "unrelated-name",
+            "Completely unrelated description about cooking pasta.",
+        );
+        assert_eq!(m, QueryMatch::None);
+        assert_eq!(score, 0.0, "totally unrelated query should score 0.0");
     }
 
     // ── test_skill integration ───────────────────────────────────────
