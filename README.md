@@ -12,6 +12,17 @@
   </tr>
 </table>
 
+**Agent skills** are the building blocks of
+[Anthropic's plugin system](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/plugins)
+for Claude Code.
+Each skill is defined in a `SKILL.md` file — a Markdown document fronted by YAML metadata
+(name, description, compatibility, allowed tools) that tells Claude *what* the skill does and
+*when* to invoke it. The metadata is indexed at session start for fast discovery; the full
+Markdown body is loaded on demand, following a
+[progressive-disclosure](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/tutorials/build-skills)
+pattern that keeps the context window lean. `aigent` validates, formats, and assembles these
+skill files so you can focus on writing the instructions rather than fighting the spec.
+
 ## Table of Contents
 
 - [Installation](#installation)

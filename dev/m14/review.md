@@ -235,3 +235,335 @@ These are not problems — just noting things outside M14 scope:
 **Recommendation:** Proceed with execution. Apply the merge order
 recommendations from §5 to reduce conflict friction. Clarify the
 `read_body` empty-body behavior (§3.1) before Agent D starts.
+
+---
+---
+
+# M14: Code Review — Implementation Review
+
+Review of the `dev/m14` branch (29 commits, `35bcd88`) against `main`
+at `2c2309d`.
+
+Baseline: 481 tests. Post-M14: 544 tests (410 unit + 106 CLI + 27 plugin
++ 1 doc-test). Net delta: +63 tests, +1268 lines (1433 added, 165 removed)
+across 25 files.
+
+---
+
+## Verdict
+
+The implementation is solid. All 14 issues addressed, all tests pass
+(544/544), clippy clean, formatting clean. The code correctly follows
+the plan and its reconciled amendments (A1–A6). Two bugs found (one in
+`version.sh`, one missing depth limit). Several design observations worth
+noting for future work.
+
+| Dimension | Rating | Notes |
+|-----------|:------:|-------|
+| Correctness | ✅ | All tests pass, clippy/fmt clean |
+| Plan adherence | ✅ | All 14 issues implemented per plan + amendments |
+| Test coverage | ✅ | 63 new tests (plan estimated 35–45) |
+| API design | ✅ | Backward-compatible verbose variants, clean error propagation |
+| Security hardening | ✅ | Symlink safety, path traversal, file size cap all correct |
+| Commit hygiene | ⚠️ | 11 duplicate commit messages from worktree merges |
+| Shell portability | ⚠️ | `version.sh` CHANGES.md stub uses non-portable `\n` in sed |
+| Depth limits | ⚠️ | `check_symlinks_recursive` missing depth limit |
+
+---
+
+## 1. Bugs
+
+### 1.1 `version.sh`: Non-portable `\n` in sed replacement (LOW)
+
+**File:** `scripts/version.sh:127–129`
+
+```bash
+STUB="## [$VERSION] — $TODAY\n\n_No changes yet._\n"
+sedi "s/^# Changes$/# Changes\n\n$STUB/" "$CHANGES"
+```
+
+BSD `sed` (macOS) does not interpret `\n` as a newline in the replacement
+string. This produces literal `\n` characters in the output on macOS.
+The old `bump-version.sh` used a `head`/`tail`/temp-file approach that
+was portable.
+
+**Fix:** Use a temp-file approach (as the old script did), or use `printf`
+with process substitution, or use `awk` for the insertion.
+
+### 1.2 `check_symlinks_recursive`: No depth limit (LOW)
+
+**File:** `src/structure.rs:277–311`
+
+The function `check_symlinks_recursive` walks directories recursively
+without a depth limit. While it only follows real directories (not
+symlinks), a deeply nested directory structure could exhaust the stack.
+Both `discover_skills_recursive` and `copy_dir_recursive` received depth
+limits in this milestone (PERF-2, #96), but `check_symlinks_recursive`
+was not included.
+
+This is LOW severity because `check_nesting_recursive` (which shares the
+same call site in `validate_structure`) already has `MAX_NESTING_DEPTH = 2`,
+meaning overly deep structures would be flagged by S004 before anyone
+would notice. However, the two functions are independent — `check_symlinks`
+could be called separately.
+
+**Fix:** Add the same `depth` parameter pattern used in the other recursive
+functions, capping at `MAX_DISCOVERY_DEPTH` or similar.
+
+---
+
+## 2. Design Observations
+
+### 2.1 Comment placement after key reordering (#103)
+
+The new comment-handling logic in `format_frontmatter` collects all
+interleaved comments (comments between keys) into a single list and emits
+them between known keys and unknown keys. This means comments lose their
+positional relationship to specific keys.
+
+Example input:
+```yaml
+description: Does things
+# About the name
+name: my-skill
+```
+
+After reordering:
+```yaml
+name: my-skill
+description: Does things
+# About the name
+```
+
+The comment "About the name" now appears after `description`, not adjacent
+to `name`. This is acceptable — the plan says comments should be "anchored
+to position" not "attached to keys" — but it's a trade-off that may
+surprise users. The idempotency test passes, which is the critical
+property.
+
+### 2.2 `read_file_checked` uses `metadata()` not `symlink_metadata()`
+
+**File:** `src/parser.rs:18–29`
+
+`read_file_checked` calls `std::fs::metadata(path)` to check the file
+size. This follows symlinks, so a symlink pointing to a large file would
+be checked against the target's size (correct behavior), but the function
+itself doesn't reject symlinks. This is fine because callers reach
+`read_file_checked` only through `find_skill_md` (which rejects symlinks
+via `is_regular_file`) or through explicit path arguments in fixer/
+formatter/test_runner where the user is providing the path directly.
+
+No action needed — just documenting the design.
+
+### 2.3 Duplicate TOCTOU error-mapping code in `builder/mod.rs`
+
+**File:** `src/builder/mod.rs:172–190` and `src/builder/mod.rs:218–236`
+
+The `build_skill` and `init_skill` functions both contain identical
+`create_new(true)` + `map_err` blocks (~18 lines each). This could be
+extracted into a helper like `write_skill_md_exclusive(path, content)`.
+Not a bug — just notable duplication for future cleanup.
+
+### 2.4 `discover_skills_recursive_verbose` silently stops at max depth
+
+**File:** `src/validator.rs:470–471`
+
+When `depth > MAX_DISCOVERY_DEPTH`, the verbose variant returns silently
+without collecting a warning. Skills beyond depth 10 are invisible to
+the user with no indication that the search stopped. Consider emitting
+a `DiscoveryWarning` when the depth limit is hit.
+
+### 2.5 `collect_skills_verbose` redundant `find_skill_md` call
+
+**File:** `src/prompt.rs:102–108`
+
+After `read_properties(&canonical)` succeeds (which internally calls
+`find_skill_md`), the function calls `find_skill_md(&canonical)` again
+to get the location path. This is a redundant filesystem call. Minor
+perf impact; could be avoided by having `read_properties` return the
+path, or by constructing the location from the canonical path directly.
+
+### 2.6 Step numbering gap in `build_skill`
+
+**File:** `src/builder/mod.rs:164–192`
+
+After removing the check-then-write steps, comments jump from step 9 to
+step 11 (step 10 was removed). Cosmetic only.
+
+---
+
+## 3. Test Quality
+
+### 3.1 Coverage assessment
+
+63 new tests added (plan estimated 35–45). All issue categories covered:
+
+| Issue | New tests | Assessment |
+|-------|:---------:|------------|
+| #87 (symlink safety) | 13 | `fs_util` (10), `parser` (1), `structure` (2) |
+| #88 (read_body errors) | 4 | Missing dir, valid body, empty body, error message |
+| #89 (path traversal) | 6 | Parent traversal, dot-slash, embedded, multiple, skip S001 |
+| #90 (file size cap) | 4 | Normal, oversized, exact 1 MiB, nonexistent |
+| #91/#92 (discovery warnings) | 10 | Both `discover_skills_verbose` and `collect_skills_verbose` |
+| #93 (TOCTOU) | 4 | Error contains path, does not overwrite existing |
+| #94 (CRLF) | 4 | Pure CRLF, mixed, LF unchanged, idempotent |
+| #95 (pre-tokenize) | 4 | Tokenize, jaccard_from_sets, match old results, empty sets |
+| #96 (depth limits) | 5 | Normal depth, exceeds limit, error message (assembler + validator) |
+| #103 (comments) | 6 | Between keys, inline, consecutive, indented, header, idempotent |
+| Backward compat | 3 | `discover_skills`, `collect_skills`, `format_entries` |
+
+### 3.2 Edge cases well covered
+
+- Exact boundary test for 1 MiB (tests `>` not `>=`)
+- Symlink tests gated with `#[cfg(unix)]`
+- S006 verifies traversal paths don't also trigger S001
+- CRLF idempotency: `format(format(crlf)) == format(crlf)`
+- Comment idempotency: `format(format(comments)) == format(comments)`
+- Backward compat tests compare old and new API results
+
+### 3.3 Missing tests (non-blocking)
+
+- `check_symlinks_recursive` with deeply nested symlinks (relates to §1.2)
+- `version.sh` — no automated tests (per plan: "manual verification")
+- `discover_skills_verbose` at exactly `MAX_DISCOVERY_DEPTH` (boundary)
+- `read_file_checked` on a symlink to an oversized file
+
+---
+
+## 4. API Changes
+
+### 4.1 Breaking: `read_body` signature change (#88)
+
+`pub fn read_body(dir: &Path) -> String` → `pub fn read_body(dir: &Path) -> Result<String>`
+
+All callers updated correctly. Three patterns used:
+
+| Pattern | Where | Reason |
+|---------|-------|--------|
+| `.unwrap_or_default()` | `main.rs` (check, upgrade loops) | Graceful degradation in validation context |
+| `?` operator | `main.rs` (body length check) | Must propagate to user |
+| `.unwrap_or_default()` | `scorer.rs` | Graceful degradation in scoring context |
+| `.unwrap_or_default()` | `structure.rs` | Graceful degradation in structure validation |
+
+The `unwrap_or_default()` usages are reasonable — these callers previously
+got an empty string on error, so the behavior is preserved.
+
+### 4.2 Additive: New public types and functions
+
+| Addition | Module | Notes |
+|----------|--------|-------|
+| `DiscoveryWarning` | `validator` | Struct with `path` and `message` fields |
+| `discover_skills_verbose()` | `validator` | Returns `(Vec<PathBuf>, Vec<DiscoveryWarning>)` |
+| `collect_skills_verbose()` | `prompt` | Returns `(Vec<SkillEntry>, Vec<DiscoveryWarning>)` |
+| `format_entries()` | `prompt` | Formats pre-collected entries |
+
+All re-exported from `lib.rs`. Backward-compatible — original functions
+unchanged.
+
+---
+
+## 5. Security Hardening Assessment
+
+### 5.1 SEC-1: Symlink safety (#87) — ✅
+
+- `fs_util.rs` created with `is_regular_file`, `is_regular_dir`, `is_symlink`
+- All `path.is_file()` / `path.is_dir()` in security-sensitive paths replaced
+- `find_skill_md` rejects symlinked SKILL.md files
+- `discover_skills_recursive` skips symlinked directories
+- `copy_dir_recursive` skips symlinks
+- `S005` diagnostic emitted by structure validation
+- `S005` correctly uses `Severity::Info` (not Warning)
+
+### 5.2 SEC-2: Path traversal guard (#89) — ✅
+
+- `contains_path_traversal` uses `Path::components()` — robust against
+  false positives (won't match `..` substrings in filenames)
+- S006 emitted before existence check (correct: `continue` after S006
+  prevents S001)
+- Tests cover `../`, `sub/../`, and `./` (no false positive)
+
+### 5.3 SEC-3: File size cap (#90) — ✅
+
+- `MAX_FILE_SIZE = 1_048_576` (1 MiB)
+- `read_file_checked` used in parser, validator, fixer, formatter, test_runner
+- Boundary test confirms `>` (not `>=`): exactly 1 MiB passes
+
+---
+
+## 6. Commit Hygiene
+
+29 commits on the branch, of which 11 have duplicate messages (each
+appearing twice). This is an artifact of the worktree merge strategy:
+task branches were merged into `dev/m14`, producing merge commits that
+duplicate the original commit summaries.
+
+**Recommendation:** Before merging to `main`, consider squashing the
+duplicate pairs. The fixup commits (`fixup: fix rustdoc warning`,
+`fixup: use symlink-safe helpers`) should also be squashed into their
+parent commits. Target: ~15 clean commits for the final PR.
+
+---
+
+## 7. Scope Comparison
+
+| Metric | Plan (revised) | Actual | Delta |
+|--------|:--------------:|:------:|:-----:|
+| New files | 2 | 2 (`fs_util.rs`, `version.sh`) | ✅ |
+| Deleted files | 1 | 1 (`bump-version.sh`) | ✅ |
+| Modified files | 17–18 | 18 | ✅ |
+| New tests | 35–45 | 63 | ↑ exceeded |
+| Net line delta | +500–700 | +1268 | ↑ exceeded |
+| Version | 0.3.0 → 0.4.0 | 0.4.0 | ✅ |
+
+The line delta is higher than estimated, primarily due to more thorough
+test coverage (63 vs estimated 45) and the verbose discovery variants
+adding more code than projected.
+
+---
+
+## 8. Summary
+
+The M14 implementation is well-executed and ready for merge after
+addressing the two bugs (§1.1 and §1.2). The security hardening is
+correct and comprehensive. Test coverage exceeds estimates. API changes
+are backward-compatible where possible and well-documented where breaking.
+
+### Action items before merge
+
+| Priority | Item | Effort |
+|----------|------|--------|
+| **Must fix** | §1.1: `version.sh` CHANGES.md sed portability | 10 min |
+| **Should fix** | §1.2: Add depth limit to `check_symlinks_recursive` | 5 min |
+| **Should fix** | §6: Squash duplicate commits before PR | 10 min |
+| Nice to have | §2.3: Extract TOCTOU helper in `builder/mod.rs` | 5 min |
+| Nice to have | §2.4: Emit warning at max discovery depth | 5 min |
+| Nice to have | §2.6: Fix step numbering in `build_skill` | 1 min |
+
+---
+
+## M14 Code Review (Branch `dev/m14`)
+
+Reviewed branch head `35bcd88` against `main` (`2c2309d`) with focus on
+security hardening, reliability changes, formatter behavior, and release
+script updates.
+
+### Findings
+
+No blocking defects found in the implemented M14 code.
+
+### Validation Performed
+
+- Ran full test suite: `cargo test` (all passing).
+- Spot-checked high-risk changes in:
+  - `src/parser.rs`
+  - `src/validator.rs`
+  - `src/structure.rs`
+  - `src/builder/mod.rs`
+  - `src/assembler.rs`
+  - `src/formatter.rs`
+  - `scripts/version.sh`
+
+### Residual Risks / Testing Gaps
+
+- `scripts/version.sh` behavior is not covered by automated tests (README/CHANGES rewrite paths are only manually verified).
+- Symlink and permission behavior remains primarily Unix-tested (`#[cfg(unix)]` paths), so cross-platform edge cases still depend on manual verification.
