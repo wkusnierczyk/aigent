@@ -902,6 +902,74 @@ fn format_doc_catalog(entries: &[aigent::SkillEntry]) -> String {
     out
 }
 
+/// Extract frontmatter lines from SKILL.md content (between the `---` delimiters).
+///
+/// Returns the lines without the delimiters.
+fn extract_frontmatter_lines(content: &str) -> Vec<String> {
+    content
+        .lines()
+        .skip(1) // skip opening ---
+        .take_while(|l| *l != "---")
+        .map(|l| l.to_string())
+        .collect()
+}
+
+/// Detect the indentation style used in frontmatter lines.
+///
+/// Scans for the first indented line and returns its leading spaces.
+/// Defaults to "  " (2 spaces) if no indented lines are found.
+/// Note: YAML forbids tabs for indentation, so only spaces are considered.
+fn detect_indent(lines: &[String]) -> String {
+    for line in lines {
+        if line.starts_with(' ') {
+            let indent: String = line.chars().take_while(|c| *c == ' ').collect();
+            return indent;
+        }
+    }
+    "  ".to_string() // default: 2 spaces
+}
+
+/// Find the insertion position for new metadata keys.
+///
+/// Locates the `metadata:` line (not in a comment) and returns the index
+/// after the last indented child key beneath it.
+fn find_metadata_insert_position(lines: &[String]) -> usize {
+    let mut meta_line_idx = None;
+
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        // Skip comment lines.
+        if trimmed.starts_with('#') {
+            continue;
+        }
+        // Match `metadata:` as a top-level key (not indented).
+        if trimmed.starts_with("metadata:") && !line.starts_with(' ') {
+            meta_line_idx = Some(i);
+            break;
+        }
+    }
+
+    if let Some(idx) = meta_line_idx {
+        // Walk forward from metadata: to find the last indented child line.
+        let mut last_child = idx;
+        for (i, line) in lines.iter().enumerate().skip(idx + 1) {
+            if line.is_empty() || line.starts_with(' ') {
+                // Still inside the metadata block (indented or blank).
+                if !line.trim().is_empty() {
+                    last_child = i;
+                }
+            } else {
+                // Hit a non-indented line — end of metadata block.
+                break;
+            }
+        }
+        last_child + 1
+    } else {
+        // Fallback: insert at the end.
+        lines.len()
+    }
+}
+
 /// Run upgrade analysis on a skill directory.
 ///
 /// Checks for missing best-practice fields and returns a list of human-readable
@@ -1024,54 +1092,46 @@ fn run_upgrade(
         if let Some(path) = aigent::find_skill_md(dir) {
             if let Ok(content) = std::fs::read_to_string(&path) {
                 if let Ok((raw_map, body)) = aigent::parse_frontmatter(&content) {
-                    let mut updated_yaml = String::new();
-                    // Re-serialize frontmatter with additions.
-                    // We simply append missing fields to existing frontmatter.
-                    let existing_front = content
-                        .lines()
-                        .skip(1) // skip opening ---
-                        .take_while(|l| *l != "---")
-                        .collect::<Vec<_>>()
-                        .join("\n");
+                    let front_lines = extract_frontmatter_lines(&content);
+                    let mut updated_lines = front_lines.clone();
 
-                    updated_yaml.push_str(&existing_front);
-
+                    // Append compatibility if missing.
                     if props.compatibility.is_none() && !raw_map.contains_key("compatibility") {
-                        updated_yaml.push_str("\ncompatibility: claude-code");
+                        updated_lines.push("compatibility: claude-code".to_string());
                     }
 
+                    // Insert metadata keys.
                     if !has_version || !has_author {
                         if meta_block.is_none() {
-                            // No metadata block at all — add the entire block.
-                            updated_yaml.push_str("\nmetadata:");
+                            // No metadata block — append entire block.
+                            updated_lines.push("metadata:".to_string());
+                            let indent = detect_indent(&front_lines);
                             if !has_version {
-                                updated_yaml.push_str("\n  version: '0.1.0'");
+                                updated_lines.push(format!("{indent}version: '0.1.0'"));
                             }
                             if !has_author {
-                                updated_yaml.push_str("\n  author: unknown");
+                                updated_lines.push(format!("{indent}author: unknown"));
                             }
                         } else {
-                            // Partial metadata exists — append missing keys under it.
-                            // Find the metadata: line and insert after it.
-                            let lines: Vec<&str> = updated_yaml.lines().collect();
-                            let mut new_yaml = String::new();
-                            for line in &lines {
-                                new_yaml.push_str(line);
-                                new_yaml.push('\n');
-                                if line.trim_start().starts_with("metadata:") {
-                                    if !has_version {
-                                        new_yaml.push_str("  version: '0.1.0'\n");
-                                    }
-                                    if !has_author {
-                                        new_yaml.push_str("  author: unknown\n");
-                                    }
-                                }
+                            // Partial metadata — find the metadata: line and insert after
+                            // the last existing child key under it.
+                            let indent = detect_indent(&front_lines);
+                            let insert_pos = find_metadata_insert_position(&updated_lines);
+                            let mut to_insert = Vec::new();
+                            if !has_version {
+                                to_insert.push(format!("{indent}version: '0.1.0'"));
                             }
-                            // Remove trailing newline to match expected format.
-                            updated_yaml = new_yaml.trim_end_matches('\n').to_string();
+                            if !has_author {
+                                to_insert.push(format!("{indent}author: unknown"));
+                            }
+                            // Insert after the last metadata child, in reverse to maintain order.
+                            for (i, line) in to_insert.into_iter().enumerate() {
+                                updated_lines.insert(insert_pos + i, line);
+                            }
                         }
                     }
 
+                    let updated_yaml = updated_lines.join("\n");
                     let new_content = format!("---\n{updated_yaml}\n---\n{body}");
                     if new_content != content {
                         std::fs::write(&path, &new_content)?;
