@@ -190,6 +190,9 @@ enum Commands {
         /// Apply automatic upgrades
         #[arg(long)]
         apply: bool,
+        /// Run validate + lint before upgrade (with --apply, also fix errors first)
+        #[arg(long)]
+        full: bool,
         /// Output format
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
@@ -604,10 +607,11 @@ fn main() {
         Some(Commands::Upgrade {
             skill_dir,
             apply,
+            full,
             format,
         }) => {
             let dir = resolve_skill_dir(&skill_dir);
-            match run_upgrade(&dir, apply) {
+            match run_upgrade(&dir, apply, full) {
                 Ok(suggestions) => {
                     if suggestions.is_empty() {
                         eprintln!("No upgrade suggestions — skill follows current best practices.");
@@ -899,12 +903,58 @@ fn format_doc_catalog(entries: &[aigent::SkillEntry]) -> String {
 ///
 /// Checks for missing best-practice fields and returns a list of human-readable
 /// suggestions. With `apply = true`, attempts to add missing optional fields.
+/// With `full = true`, also runs validate + lint first (and applies fixes if
+/// `apply` is also true).
 fn run_upgrade(
     dir: &std::path::Path,
     apply: bool,
+    full: bool,
 ) -> std::result::Result<Vec<String>, aigent::AigentError> {
-    let props = aigent::read_properties(dir)?;
     let mut suggestions = Vec::new();
+
+    // Full mode: run validate + lint before upgrade analysis.
+    if full {
+        let mut diags = aigent::validate(dir);
+        if let Ok(props) = aigent::read_properties(dir) {
+            let body = aigent::read_body(dir);
+            diags.extend(aigent::lint(&props, &body));
+        }
+
+        if apply {
+            let fixable: Vec<_> = diags
+                .iter()
+                .filter(|d| d.suggestion.is_some())
+                .cloned()
+                .collect();
+            if !fixable.is_empty() {
+                let fix_count = aigent::apply_fixes(dir, &fixable)?;
+                if fix_count > 0 {
+                    suggestions.push(format!(
+                        "[full] Applied {fix_count} validation/lint fix(es)"
+                    ));
+                }
+                // Re-run diagnostics after fixes to get fresh state.
+                diags = aigent::validate(dir);
+                if let Ok(props) = aigent::read_properties(dir) {
+                    let body = aigent::read_body(dir);
+                    diags.extend(aigent::lint(&props, &body));
+                }
+            }
+        }
+
+        let errors: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
+        let warnings: Vec<_> = diags.iter().filter(|d| d.is_warning()).collect();
+        if !errors.is_empty() || !warnings.is_empty() {
+            for d in &errors {
+                suggestions.push(format!("[full] error: {d}"));
+            }
+            for d in &warnings {
+                suggestions.push(format!("[full] warning: {d}"));
+            }
+        }
+    }
+
+    let props = aigent::read_properties(dir)?;
 
     // Check for missing compatibility field.
     if props.compatibility.is_none() {
@@ -1021,9 +1071,7 @@ fn run_upgrade(
 
                     let new_content = format!("---\n{updated_yaml}\n---\n{body}");
                     if new_content != content {
-                        std::fs::write(&path, new_content).unwrap_or_else(|e| {
-                            eprintln!("aigent upgrade: failed to write {}: {e}", path.display());
-                        });
+                        std::fs::write(&path, &new_content)?;
                         eprintln!("Applied upgrades to {}", path.display());
                     }
                 }
