@@ -79,7 +79,7 @@ impl From<PromptOutputFormat> for aigent::prompt::PromptFormat {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Validate skill directories
+    /// Validate skill directories (spec conformance)
     Validate {
         /// Paths to skill directories or SKILL.md files
         skill_dirs: Vec<PathBuf>,
@@ -89,9 +89,6 @@ enum Commands {
         /// Validation target profile
         #[arg(long, value_enum, default_value_t = Target::Standard)]
         target: Target,
-        /// Run semantic lint checks
-        #[arg(long)]
-        lint: bool,
         /// Run directory structure checks
         #[arg(long)]
         structure: bool,
@@ -105,13 +102,29 @@ enum Commands {
         #[arg(long)]
         watch: bool,
     },
-    /// Run semantic lint checks on a skill directory
-    Lint {
-        /// Path to skill directory or SKILL.md file
-        skill_dir: PathBuf,
+    /// Run validate + semantic quality checks (superset of validate)
+    #[command(alias = "lint")]
+    Check {
+        /// Paths to skill directories or SKILL.md files
+        skill_dirs: Vec<PathBuf>,
         /// Output format
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
+        /// Validation target profile
+        #[arg(long, value_enum, default_value_t = Target::Standard)]
+        target: Target,
+        /// Skip spec conformance checks (semantic quality only)
+        #[arg(long)]
+        no_validate: bool,
+        /// Run directory structure checks
+        #[arg(long)]
+        structure: bool,
+        /// Discover skills recursively
+        #[arg(long)]
+        recursive: bool,
+        /// Apply automatic fixes for fixable issues
+        #[arg(long)]
+        apply_fixes: bool,
     },
     /// Read skill properties as JSON
     ReadProperties {
@@ -120,7 +133,8 @@ enum Commands {
         skill_dir: PathBuf,
     },
     /// Generate prompt from skill directories
-    ToPrompt {
+    #[command(alias = "to-prompt")]
+    Prompt {
         /// Paths to skill directories
         skill_dirs: Vec<PathBuf>,
         /// Output format
@@ -133,8 +147,9 @@ enum Commands {
         #[arg(long)]
         output: Option<PathBuf>,
     },
-    /// Build a skill from a natural language description
-    Build {
+    /// Create a new skill from a natural language description
+    #[command(alias = "build")]
+    New {
         /// What the skill should do
         purpose: String,
         /// Override the derived skill name
@@ -170,8 +185,9 @@ enum Commands {
         #[arg(long)]
         recursive: bool,
     },
-    /// Test a skill against a sample user query
-    Test {
+    /// Probe a skill's activation surface with a sample query
+    #[command(alias = "test")]
+    Probe {
         /// Path to skill directory or SKILL.md file
         #[arg(name = "skill-dir")]
         skill_dir: PathBuf,
@@ -220,7 +236,6 @@ fn main() {
             skill_dirs,
             format,
             target,
-            lint,
             structure,
             recursive,
             apply_fixes,
@@ -233,7 +248,6 @@ fn main() {
                     &skill_dirs,
                     format,
                     target,
-                    lint,
                     structure,
                     recursive,
                     apply_fixes,
@@ -275,14 +289,6 @@ fn main() {
                         Err(e) => {
                             eprintln!("warning: could not apply fixes to {}: {e}", dir.display());
                         }
-                    }
-                }
-
-                // Append lint results if requested.
-                if lint {
-                    if let Ok(props) = aigent::read_properties(dir) {
-                        let body = aigent::read_body(dir);
-                        diags.extend(aigent::lint(&props, &body));
                     }
                 }
 
@@ -376,32 +382,122 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Some(Commands::Lint { skill_dir, format }) => {
-            let dir = resolve_skill_dir(&skill_dir);
-            let diags = match aigent::read_properties(&dir) {
-                Ok(props) => {
-                    let body = aigent::read_body(&dir);
-                    aigent::lint(&props, &body)
+        Some(Commands::Check {
+            skill_dirs,
+            format,
+            target,
+            no_validate,
+            structure,
+            recursive,
+            apply_fixes,
+        }) => {
+            let dirs = resolve_dirs(&skill_dirs, recursive);
+            if dirs.is_empty() {
+                if recursive {
+                    eprintln!("No SKILL.md files found under the specified path(s).");
+                } else {
+                    eprintln!("Usage: aigent check <skill-dir> [<skill-dir>...]");
                 }
-                Err(e) => {
-                    eprintln!("aigent lint: {e}");
-                    std::process::exit(1);
+                std::process::exit(1);
+            }
+
+            let mut all_diags: Vec<(PathBuf, Vec<Diagnostic>)> = Vec::new();
+            let target_val: ValidationTarget = target.into();
+
+            for dir in &dirs {
+                let mut diags = Vec::new();
+
+                // Run spec conformance checks unless --no-validate.
+                if !no_validate {
+                    diags.extend(aigent::validate_with_target(dir, target_val));
+
+                    // Apply fixes if requested.
+                    if apply_fixes {
+                        match aigent::apply_fixes(dir, &diags) {
+                            Ok(count) if count > 0 => {
+                                eprintln!("Applied {count} fix(es) to {}", dir.display());
+                                diags = aigent::validate_with_target(dir, target_val);
+                            }
+                            Ok(_) => {}
+                            Err(e) => {
+                                eprintln!(
+                                    "warning: could not apply fixes to {}: {e}",
+                                    dir.display()
+                                );
+                            }
+                        }
+                    }
                 }
-            };
+
+                // Always run semantic lint checks (the core of `check`).
+                if let Ok(props) = aigent::read_properties(dir) {
+                    let body = aigent::read_body(dir);
+                    diags.extend(aigent::lint(&props, &body));
+                }
+
+                // Append structure checks if requested.
+                if structure {
+                    diags.extend(aigent::validate_structure(dir));
+                }
+
+                all_diags.push((dir.clone(), diags));
+            }
+
+            let has_errors = all_diags
+                .iter()
+                .any(|(_, d)| d.iter().any(|d| d.is_error()));
 
             match format {
                 Format::Text => {
-                    for d in &diags {
-                        eprintln!("{d}");
+                    let multi = all_diags.len() > 1;
+                    for (dir, diags) in &all_diags {
+                        if multi && !diags.is_empty() {
+                            eprintln!("{}:", dir.display());
+                        }
+                        for d in diags {
+                            if multi {
+                                eprintln!("  {d}");
+                            } else {
+                                eprintln!("{d}");
+                            }
+                        }
+                    }
+                    if multi {
+                        let total = all_diags.len();
+                        let errors = all_diags
+                            .iter()
+                            .filter(|(_, d)| d.iter().any(|d| d.is_error()))
+                            .count();
+                        let warnings = all_diags
+                            .iter()
+                            .filter(|(_, d)| {
+                                d.iter().any(|d| d.is_warning()) && !d.iter().any(|d| d.is_error())
+                            })
+                            .count();
+                        let ok = total - errors - warnings;
+                        eprintln!(
+                            "\n{total} skills: {ok} ok, {errors} errors, {warnings} warnings only"
+                        );
                     }
                 }
                 Format::Json => {
-                    let json = serde_json::to_string_pretty(&diags).unwrap();
+                    let entries: Vec<serde_json::Value> = all_diags
+                        .iter()
+                        .map(|(dir, diags)| {
+                            serde_json::json!({
+                                "path": dir.display().to_string(),
+                                "diagnostics": diags,
+                            })
+                        })
+                        .collect();
+                    let json = serde_json::to_string_pretty(&entries).unwrap();
                     println!("{json}");
                 }
             }
 
-            // Lint never causes failure — all diagnostics are Info.
+            if has_errors {
+                std::process::exit(1);
+            }
         }
         Some(Commands::ReadProperties { skill_dir }) => {
             let dir = resolve_skill_dir(&skill_dir);
@@ -415,7 +511,7 @@ fn main() {
                 }
             }
         }
-        Some(Commands::ToPrompt {
+        Some(Commands::Prompt {
             skill_dirs,
             format,
             budget,
@@ -487,7 +583,7 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Some(Commands::Build {
+        Some(Commands::New {
             purpose,
             name,
             dir,
@@ -519,7 +615,7 @@ fn main() {
                     );
                 }
                 Err(e) => {
-                    eprintln!("aigent build: {e}");
+                    eprintln!("aigent new: {e}");
                     std::process::exit(1);
                 }
             }
@@ -574,7 +670,7 @@ fn main() {
                 println!("{content}");
             }
         }
-        Some(Commands::Test {
+        Some(Commands::Probe {
             skill_dir,
             query,
             format,
@@ -602,7 +698,7 @@ fn main() {
                     }
                 },
                 Err(e) => {
-                    eprintln!("aigent test: {e}");
+                    eprintln!("aigent probe: {e}");
                     std::process::exit(1);
                 }
             }
@@ -725,7 +821,6 @@ fn run_watch_mode(
     skill_dirs: &[PathBuf],
     _format: Format,
     target: Target,
-    lint: bool,
     structure: bool,
     recursive: bool,
     apply_fixes: bool,
@@ -743,7 +838,7 @@ fn run_watch_mode(
     let target_val: aigent::diagnostics::ValidationTarget = target.into();
 
     // Run initial validation.
-    run_validation_pass(&dirs, target_val, lint, structure, apply_fixes);
+    run_validation_pass(&dirs, target_val, structure, apply_fixes);
 
     // Set up file watcher.
     let (tx, rx) = mpsc::channel();
@@ -790,7 +885,7 @@ fn run_watch_mode(
 
                 // Re-resolve dirs in case new skills appeared.
                 let dirs = resolve_dirs(skill_dirs, recursive);
-                run_validation_pass(&dirs, target_val, lint, structure, apply_fixes);
+                run_validation_pass(&dirs, target_val, structure, apply_fixes);
 
                 last_run = Instant::now();
 
@@ -810,7 +905,6 @@ fn run_watch_mode(
 fn run_validation_pass(
     dirs: &[PathBuf],
     target: aigent::diagnostics::ValidationTarget,
-    lint: bool,
     structure: bool,
     apply_fixes: bool,
 ) {
@@ -826,13 +920,6 @@ fn run_validation_pass(
                     eprintln!("Applied {count} fix(es) to {}", dir.display());
                     diags = aigent::validate_with_target(dir, target);
                 }
-            }
-        }
-
-        if lint {
-            if let Ok(props) = aigent::read_properties(dir) {
-                let body = aigent::read_body(dir);
-                diags.extend(aigent::lint(&props, &body));
             }
         }
 

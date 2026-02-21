@@ -481,24 +481,24 @@ fn validate_target_permissive_no_unknown_field_warnings() {
         .stderr(predicate::str::is_empty());
 }
 
-// ── --lint flag ────────────────────────────────────────────────────
+// ── check command (validate + semantic) ───────────────────────────
 
 #[test]
-fn validate_with_lint_shows_info_diagnostics() {
+fn check_shows_info_diagnostics() {
     // Name is not gerund, description has no trigger phrase and is vague.
     let (_parent, dir) = make_skill_dir(
         "helper",
         "---\nname: helper\ndescription: Helps\n---\nBody.\n",
     );
     aigent()
-        .args(["validate", dir.to_str().unwrap(), "--lint"])
+        .args(["check", dir.to_str().unwrap()])
         .assert()
-        .success() // lint never causes failure
+        .success() // lint info never causes failure
         .stderr(predicate::str::contains("info:"));
 }
 
 #[test]
-fn validate_without_lint_no_info_diagnostics() {
+fn validate_without_check_no_info_diagnostics() {
     let (_parent, dir) = make_skill_dir(
         "helper",
         "---\nname: helper\ndescription: Helps\n---\nBody.\n",
@@ -510,14 +510,36 @@ fn validate_without_lint_no_info_diagnostics() {
         .stderr(predicate::str::contains("info:").not());
 }
 
-// ── lint subcommand ────────────────────────────────────────────────
+#[test]
+fn check_no_validate_skips_conformance() {
+    // A skill with invalid name format — should fail validate, but
+    // --no-validate skips conformance so only semantic checks run.
+    let (_parent, dir) = make_skill_dir(
+        "UPPERCASE",
+        "---\nname: UPPERCASE\ndescription: Helps with things\n---\nBody.\n",
+    );
+    // Without --no-validate: fails because name has uppercase.
+    aigent()
+        .args(["check", dir.to_str().unwrap()])
+        .assert()
+        .failure();
+    // With --no-validate: only semantic checks, which are info-level.
+    aigent()
+        .args(["check", dir.to_str().unwrap(), "--no-validate"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("info:"));
+}
+
+// ── lint alias (maps to check) ────────────────────────────────────
 
 #[test]
-fn lint_subcommand_shows_info() {
+fn lint_alias_shows_info() {
     let (_parent, dir) = make_skill_dir(
         "helper",
         "---\nname: helper\ndescription: Helps\n---\nBody.\n",
     );
+    // `lint` is an alias for `check` — runs validate + semantic checks.
     aigent()
         .args(["lint", dir.to_str().unwrap()])
         .assert()
@@ -526,34 +548,37 @@ fn lint_subcommand_shows_info() {
 }
 
 #[test]
-fn lint_subcommand_perfect_skill_no_output() {
+fn check_perfect_skill_no_output() {
     let (_parent, dir) = make_skill_dir(
         "processing-pdfs",
         "---\nname: processing-pdfs\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
     );
     aigent()
-        .args(["lint", dir.to_str().unwrap()])
+        .args(["check", dir.to_str().unwrap()])
         .assert()
         .success()
         .stderr(predicate::str::is_empty());
 }
 
 #[test]
-fn lint_subcommand_json_format() {
+fn check_json_format() {
     let (_parent, dir) = make_skill_dir(
         "helper",
         "---\nname: helper\ndescription: Helps\n---\nBody.\n",
     );
     let output = aigent()
-        .args(["lint", dir.to_str().unwrap(), "--format", "json"])
+        .args(["check", dir.to_str().unwrap(), "--format", "json"])
         .output()
         .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    // Check outputs array-of-objects: [{"path": ..., "diagnostics": [...]}].
     let arr = json.as_array().unwrap();
     assert!(!arr.is_empty());
-    assert!(arr.iter().all(|d| d["severity"] == "info"));
+    let diags = arr[0]["diagnostics"].as_array().unwrap();
+    assert!(!diags.is_empty());
+    assert!(diags.iter().all(|d| d["severity"] == "info"));
 }
 
 // ── multi-dir validation ───────────────────────────────────────────
@@ -1369,6 +1394,123 @@ fn upgrade_apply_no_metadata_block_creates_one() {
         .args(["validate", dir.to_str().unwrap()])
         .assert()
         .success();
+}
+
+// ── M13: CLI renames and aliases (#76) ───────────────────────────
+
+#[test]
+fn new_command_creates_skill() {
+    let parent = tempdir().unwrap();
+    aigent()
+        .args([
+            "new",
+            "Process PDF files",
+            "--no-llm",
+            "--dir",
+            parent.path().join("processing-pdf-files").to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created skill"));
+}
+
+#[test]
+fn build_alias_produces_same_as_new() {
+    let parent = tempdir().unwrap();
+    // `build` is an alias for `new` — should produce same result.
+    aigent()
+        .args([
+            "build",
+            "Analyze logs",
+            "--no-llm",
+            "--dir",
+            parent.path().join("analyzing-logs").to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created skill"));
+}
+
+#[test]
+fn prompt_command_works() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: A test skill\n---\nBody.\n",
+    );
+    aigent()
+        .args(["prompt", dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<available_skills>"));
+}
+
+#[test]
+fn to_prompt_alias_works() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: A test skill\n---\nBody.\n",
+    );
+    aigent()
+        .args(["to-prompt", dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<available_skills>"));
+}
+
+#[test]
+fn probe_command_shows_activation() {
+    let (_parent, dir) = make_skill_dir(
+        "processing-pdf-files",
+        "---\nname: processing-pdf-files\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
+    );
+    aigent()
+        .args(["probe", dir.to_str().unwrap(), "process PDF files"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Activation:"));
+}
+
+#[test]
+fn test_alias_maps_to_probe() {
+    let (_parent, dir) = make_skill_dir(
+        "processing-pdf-files",
+        "---\nname: processing-pdf-files\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
+    );
+    // `test` is an alias for `probe`.
+    aigent()
+        .args(["test", dir.to_str().unwrap(), "process PDF files"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Activation:"));
+}
+
+#[test]
+fn check_runs_validate_and_lint() {
+    // A skill with a lint issue (no trigger phrase) but valid spec.
+    let (_parent, dir) = make_skill_dir(
+        "helper",
+        "---\nname: helper\ndescription: Helps with things\n---\nBody.\n",
+    );
+    // `check` should run both validate (passes) and semantic lint (finds issues).
+    aigent()
+        .args(["check", dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("info:"));
+}
+
+#[test]
+fn lint_alias_maps_to_check() {
+    let (_parent, dir) = make_skill_dir(
+        "helper",
+        "---\nname: helper\ndescription: Helps with things\n---\nBody.\n",
+    );
+    // `lint` is an alias for `check`.
+    aigent()
+        .args(["lint", dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("info:"));
 }
 
 // ── M12: watch mode (no-feature build) ───────────────────────────
