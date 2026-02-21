@@ -84,13 +84,18 @@ fn check_name_collisions(entries: &[SkillEntry]) -> Vec<Diagnostic> {
 /// C002: Check for description similarity between skills.
 ///
 /// Uses Jaccard similarity (word overlap ratio) to detect skills that
-/// might trigger on the same queries.
+/// might trigger on the same queries. Pre-tokenizes descriptions once
+/// before the O(n^2) comparison loop to avoid repeated per-pair allocations.
 fn check_description_similarity(entries: &[SkillEntry], threshold: f64) -> Vec<Diagnostic> {
-    let mut diags = Vec::new();
+    // Pre-tokenize once: O(n)
+    let token_sets: Vec<HashSet<String>> =
+        entries.iter().map(|e| tokenize(&e.description)).collect();
 
+    // Compare pairs: O(n^2) but no per-pair allocation
+    let mut diags = Vec::new();
     for i in 0..entries.len() {
         for j in (i + 1)..entries.len() {
-            let sim = jaccard_similarity(&entries[i].description, &entries[j].description);
+            let sim = jaccard_from_sets(&token_sets[i], &token_sets[j]);
             if sim >= threshold {
                 diags.push(
                     Diagnostic::new(
@@ -143,37 +148,26 @@ fn estimate_entry_tokens(entry: &SkillEntry) -> usize {
     estimate_tokens(&entry.name) + estimate_tokens(&entry.description)
 }
 
-/// Compute Jaccard similarity between two strings.
+/// Tokenize a string into a set of lowercased words.
 ///
-/// Tokenizes both strings into lowercase words, then computes the ratio
-/// of intersection size to union size. Returns a value between 0.0 and 1.0.
-fn jaccard_similarity(a: &str, b: &str) -> f64 {
-    let words_a: Vec<String> = a
-        .split_whitespace()
+/// Splits on whitespace, trims non-alphanumeric characters, lowercases,
+/// and collects into a `HashSet`.
+fn tokenize(s: &str) -> HashSet<String> {
+    s.split_whitespace()
         .map(|w| {
             w.trim_matches(|c: char| !c.is_alphanumeric())
                 .to_lowercase()
         })
         .filter(|w| !w.is_empty())
-        .collect();
-    let words_b: Vec<String> = b
-        .split_whitespace()
-        .map(|w| {
-            w.trim_matches(|c: char| !c.is_alphanumeric())
-                .to_lowercase()
-        })
-        .filter(|w| !w.is_empty())
-        .collect();
-    let set_a: HashSet<&str> = words_a.iter().map(|s| s.as_str()).collect();
-    let set_b: HashSet<&str> = words_b.iter().map(|s| s.as_str()).collect();
+        .collect()
+}
 
-    if set_a.is_empty() && set_b.is_empty() {
-        return 0.0;
-    }
-
-    let intersection = set_a.intersection(&set_b).count();
-    let union = set_a.union(&set_b).count();
-
+/// Compute Jaccard similarity between two pre-tokenized sets.
+///
+/// Returns 0.0 if both sets are empty.
+fn jaccard_from_sets(a: &HashSet<String>, b: &HashSet<String>) -> f64 {
+    let intersection = a.intersection(b).count();
+    let union = a.union(b).count();
     if union == 0 {
         0.0
     } else {
@@ -184,6 +178,15 @@ fn jaccard_similarity(a: &str, b: &str) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Compute Jaccard similarity between two strings (test-only convenience).
+    ///
+    /// Wrapper around [`tokenize`] and [`jaccard_from_sets`].
+    fn jaccard_similarity(a: &str, b: &str) -> f64 {
+        let set_a = tokenize(a);
+        let set_b = tokenize(b);
+        jaccard_from_sets(&set_a, &set_b)
+    }
 
     /// Create a SkillEntry for testing.
     fn make_entry(name: &str, description: &str) -> SkillEntry {
@@ -381,5 +384,49 @@ mod tests {
         let entries = vec![make_entry("my-skill", "A skill")];
         let diags = detect_conflicts(&entries);
         assert!(diags.is_empty());
+    }
+
+    // ── Tokenize ────────────────────────────────────────────────────────
+
+    #[test]
+    fn tokenize_produces_expected_word_set() {
+        let tokens = tokenize("Hello World hello");
+        let expected: HashSet<String> = ["hello", "world"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(tokens, expected);
+    }
+
+    #[test]
+    fn tokenize_empty_string_returns_empty_set() {
+        let tokens = tokenize("");
+        assert!(tokens.is_empty());
+    }
+
+    // ── jaccard_from_sets ───────────────────────────────────────────────
+
+    #[test]
+    fn jaccard_from_sets_matches_jaccard_similarity() {
+        let pairs = vec![
+            ("hello world", "hello world"),
+            ("hello world", "foo bar"),
+            ("hello world", "hello there"),
+            ("PDF Files", "pdf files"),
+            ("", ""),
+        ];
+        for (a, b) in pairs {
+            let from_str = jaccard_similarity(a, b);
+            let set_a = tokenize(a);
+            let set_b = tokenize(b);
+            let from_sets = jaccard_from_sets(&set_a, &set_b);
+            assert!(
+                (from_str - from_sets).abs() < f64::EPSILON,
+                "mismatch for ({a:?}, {b:?}): jaccard_similarity={from_str}, jaccard_from_sets={from_sets}",
+            );
+        }
+    }
+
+    #[test]
+    fn jaccard_from_sets_two_empty_sets_returns_zero() {
+        let empty: HashSet<String> = HashSet::new();
+        assert!(jaccard_from_sets(&empty, &empty) < f64::EPSILON);
     }
 }
