@@ -7,6 +7,7 @@
 use std::path::Path;
 
 use crate::errors::{AigentError, Result};
+use crate::parser::read_file_checked;
 use crate::tester;
 
 /// Result of running a full test suite.
@@ -77,7 +78,7 @@ pub fn run_test_suite(skill_dir: &Path) -> Result<TestSuiteResult> {
         });
     }
 
-    let content = std::fs::read_to_string(&fixture_path)?;
+    let content = read_file_checked(&fixture_path)?;
     let fixture: TestFixture =
         serde_yaml_ng::from_str(&content).map_err(|e| AigentError::Parse {
             message: format!("invalid tests.yml: {e}"),

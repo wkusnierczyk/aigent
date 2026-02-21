@@ -300,7 +300,10 @@ fn main() {
             }
 
             // Resolve directories: expand --recursive, resolve file paths.
-            let dirs = resolve_dirs(&skill_dirs, recursive);
+            let (dirs, disc_warnings) = resolve_dirs(&skill_dirs, recursive);
+            for w in &disc_warnings {
+                eprintln!("warning: {}: {}", w.path.display(), w.message);
+            }
             if dirs.is_empty() {
                 if recursive {
                     eprintln!("No SKILL.md files found under the specified path(s).");
@@ -343,7 +346,10 @@ fn main() {
             let conflict_diags = if all_diags.len() > 1 {
                 let skill_dirs_refs: Vec<&std::path::Path> =
                     dirs.iter().map(|p| p.as_path()).collect();
-                let entries = aigent::collect_skills(&skill_dirs_refs);
+                let (entries, coll_warnings) = aigent::collect_skills_verbose(&skill_dirs_refs);
+                for w in &coll_warnings {
+                    eprintln!("warning: {}: {}", w.path.display(), w.message);
+                }
                 aigent::detect_conflicts(&entries)
             } else {
                 vec![]
@@ -430,7 +436,10 @@ fn main() {
             recursive,
             apply_fixes,
         }) => {
-            let dirs = resolve_dirs(&skill_dirs, recursive);
+            let (dirs, disc_warnings) = resolve_dirs(&skill_dirs, recursive);
+            for w in &disc_warnings {
+                eprintln!("warning: {}: {}", w.path.display(), w.message);
+            }
             if dirs.is_empty() {
                 if recursive {
                     eprintln!("No SKILL.md files found under the specified path(s).");
@@ -471,7 +480,7 @@ fn main() {
                 // Always run semantic lint checks (the core of `check`).
                 match aigent::read_properties(dir) {
                     Ok(props) => {
-                        let body = aigent::read_body(dir);
+                        let body = aigent::read_body(dir).unwrap_or_default();
                         diags.extend(aigent::lint(&props, &body));
                     }
                     Err(e) => {
@@ -568,7 +577,11 @@ fn main() {
         }) => {
             let dirs: Vec<&std::path::Path> = skill_dirs.iter().map(|p| p.as_path()).collect();
             let prompt_format: aigent::prompt::PromptFormat = format.into();
-            let content = aigent::prompt::to_prompt_format(&dirs, prompt_format);
+            let (entries, warnings) = aigent::prompt::collect_skills_verbose(&dirs);
+            for w in &warnings {
+                eprintln!("warning: {}: {}", w.path.display(), w.message);
+            }
+            let content = aigent::prompt::format_entries(&entries, prompt_format);
 
             if let Some(output_path) = output {
                 // Diff-aware file output: compare with existing, only write on change.
@@ -598,7 +611,6 @@ fn main() {
                     });
                     eprintln!("Updated {}", output_path.display());
                     if budget {
-                        let entries = aigent::prompt::collect_skills(&dirs);
                         eprint!("{}", aigent::prompt::format_budget(&entries));
                     }
                     std::process::exit(1);
@@ -608,7 +620,6 @@ fn main() {
             } else {
                 println!("{content}");
                 if budget {
-                    let entries = aigent::prompt::collect_skills(&dirs);
                     eprint!("{}", aigent::prompt::format_budget(&entries));
                 }
             }
@@ -674,7 +685,10 @@ fn main() {
             output,
             recursive,
         }) => {
-            let dirs = resolve_dirs(&skill_dirs, recursive);
+            let (dirs, disc_warnings) = resolve_dirs(&skill_dirs, recursive);
+            for w in &disc_warnings {
+                eprintln!("warning: {}: {}", w.path.display(), w.message);
+            }
             if dirs.is_empty() {
                 if recursive {
                     eprintln!("No SKILL.md files found under the specified path(s).");
@@ -685,7 +699,10 @@ fn main() {
             }
 
             let dir_refs: Vec<&std::path::Path> = dirs.iter().map(|p| p.as_path()).collect();
-            let entries = aigent::collect_skills(&dir_refs);
+            let (entries, warnings) = aigent::collect_skills_verbose(&dir_refs);
+            for w in &warnings {
+                eprintln!("warning: {}: {}", w.path.display(), w.message);
+            }
             let content = format_doc_catalog(&entries);
 
             if let Some(output_path) = output {
@@ -787,7 +804,10 @@ fn main() {
             recursive,
             generate,
         }) => {
-            let dirs = resolve_dirs(&skill_dirs, recursive);
+            let (dirs, disc_warnings) = resolve_dirs(&skill_dirs, recursive);
+            for w in &disc_warnings {
+                eprintln!("warning: {}: {}", w.path.display(), w.message);
+            }
             if dirs.is_empty() {
                 if recursive {
                     eprintln!("No SKILL.md files found under the specified path(s).");
@@ -916,7 +936,10 @@ fn main() {
             check,
             recursive,
         }) => {
-            let dirs = resolve_dirs(&skill_dirs, recursive);
+            let (dirs, disc_warnings) = resolve_dirs(&skill_dirs, recursive);
+            for w in &disc_warnings {
+                eprintln!("warning: {}: {}", w.path.display(), w.message);
+            }
             if dirs.is_empty() {
                 if recursive {
                     eprintln!("No SKILL.md files found under the specified path(s).");
@@ -1006,26 +1029,32 @@ fn resolve_skill_dir(path: &std::path::Path) -> PathBuf {
     }
 }
 
-/// Resolve a list of input paths into skill directories.
+/// Resolve a list of input paths into skill directories, collecting discovery warnings.
 ///
 /// When `recursive` is true, discovers skills under each path recursively.
 /// File paths (e.g., `path/to/SKILL.md`) are resolved to their parent
 /// directory before recursive discovery.
 /// When false, treats each path as a direct skill directory (resolving
 /// SKILL.md file paths to their parent).
-fn resolve_dirs(paths: &[PathBuf], recursive: bool) -> Vec<PathBuf> {
+fn resolve_dirs(
+    paths: &[PathBuf],
+    recursive: bool,
+) -> (Vec<PathBuf>, Vec<aigent::DiscoveryWarning>) {
     let mut dirs = Vec::new();
+    let mut warnings = Vec::new();
     for path in paths {
         if recursive {
             // If the user passes a SKILL.md file path, resolve to its parent
             // before running recursive discovery.
             let resolved = resolve_skill_dir(path);
-            dirs.extend(aigent::discover_skills(&resolved));
+            let (found, warns) = aigent::discover_skills_verbose(&resolved);
+            dirs.extend(found);
+            warnings.extend(warns);
         } else {
             dirs.push(resolve_skill_dir(path));
         }
     }
-    dirs
+    (dirs, warnings)
 }
 
 /// Run watch mode: re-validate on filesystem changes (requires `watch` feature).
@@ -1042,7 +1071,10 @@ fn run_watch_mode(
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
 
-    let dirs = resolve_dirs(skill_dirs, recursive);
+    let (dirs, disc_warnings) = resolve_dirs(skill_dirs, recursive);
+    for w in &disc_warnings {
+        eprintln!("warning: {}: {}", w.path.display(), w.message);
+    }
     if dirs.is_empty() {
         eprintln!("No SKILL.md files found.");
         std::process::exit(1);
@@ -1097,7 +1129,10 @@ fn run_watch_mode(
                 eprint!("\x1b[2J\x1b[H");
 
                 // Re-resolve dirs in case new skills appeared.
-                let dirs = resolve_dirs(skill_dirs, recursive);
+                let (dirs, disc_warnings) = resolve_dirs(skill_dirs, recursive);
+                for w in &disc_warnings {
+                    eprintln!("warning: {}: {}", w.path.display(), w.message);
+                }
                 run_validation_pass(&dirs, target_val, structure, apply_fixes);
 
                 last_run = Instant::now();
@@ -1287,7 +1322,7 @@ fn run_upgrade(
     if full {
         let mut diags = aigent::validate(dir);
         if let Ok(props) = aigent::read_properties(dir) {
-            let body = aigent::read_body(dir);
+            let body = aigent::read_body(dir).unwrap_or_default();
             diags.extend(aigent::lint(&props, &body));
         }
 
@@ -1307,7 +1342,7 @@ fn run_upgrade(
                 // Re-run diagnostics after fixes to get fresh state.
                 diags = aigent::validate(dir);
                 if let Ok(props) = aigent::read_properties(dir) {
-                    let body = aigent::read_body(dir);
+                    let body = aigent::read_body(dir).unwrap_or_default();
                     diags.extend(aigent::lint(&props, &body));
                 }
             }
@@ -1379,7 +1414,7 @@ fn run_upgrade(
     }
 
     // Check body length.
-    let body = aigent::read_body(dir);
+    let body = aigent::read_body(dir)?;
     let line_count = body.lines().count();
     if line_count > 500 {
         suggestions.push(format!(

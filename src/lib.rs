@@ -35,6 +35,8 @@ pub mod errors;
 pub mod fixer;
 /// SKILL.md formatting: canonical key ordering and markdown cleanup.
 pub mod formatter;
+/// Symlink-safe filesystem helpers.
+pub(crate) mod fs_util;
 /// Semantic lint checks for skill quality improvement.
 pub mod linter;
 /// Data model for SKILL.md frontmatter properties.
@@ -70,8 +72,8 @@ pub use parser::{
     find_skill_md, parse_frontmatter, read_body, read_properties, CLAUDE_CODE_KEYS, KNOWN_KEYS,
 };
 pub use prompt::{
-    collect_skills, estimate_tokens, format_budget, to_prompt, to_prompt_format, PromptFormat,
-    SkillEntry,
+    collect_skills, collect_skills_verbose, estimate_tokens, format_budget, format_entries,
+    to_prompt, to_prompt_format, PromptFormat, SkillEntry,
 };
 pub use scorer::{score, ScoreResult};
 pub use structure::validate_structure;
@@ -80,8 +82,8 @@ pub use test_runner::{
 };
 pub use tester::{test_skill, TestResult};
 pub use validator::{
-    discover_skills, known_keys_for, validate, validate_metadata, validate_metadata_with_target,
-    validate_with_target,
+    discover_skills, discover_skills_verbose, known_keys_for, validate, validate_metadata,
+    validate_metadata_with_target, validate_with_target, DiscoveryWarning,
 };
 
 #[doc(inline)]

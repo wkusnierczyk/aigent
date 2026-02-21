@@ -1110,7 +1110,7 @@ Pushing a version tag (e.g., `v0.1.0`) triggers the release workflow:
 
 ```
 aigent: Rust AI Agent Skills Tool
-├─ version:    0.3.0
+├─ version:    0.4.0
 ├─ author:     Wacław Kuśnierczyk
 ├─ developer:  mailto:waclaw.kusnierczyk@gmail.com
 ├─ source:     https://github.com/wkusnierczyk/aigent

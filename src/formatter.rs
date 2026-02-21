@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use crate::errors::{AigentError, Result};
-use crate::parser::find_skill_md;
+use crate::parser::{find_skill_md, read_file_checked};
 
 /// Result of formatting a single skill.
 #[derive(Debug)]
@@ -46,7 +46,7 @@ pub fn format_skill(dir: &Path) -> Result<FormatResult> {
     let path = find_skill_md(dir).ok_or_else(|| AigentError::Parse {
         message: "no SKILL.md found".into(),
     })?;
-    let original = std::fs::read_to_string(&path)?;
+    let original = read_file_checked(&path)?;
 
     let content = format_content(&original)?;
     let changed = content != original;
@@ -60,14 +60,17 @@ pub fn format_skill(dir: &Path) -> Result<FormatResult> {
 ///
 /// Returns an error if the content lacks valid `---` frontmatter delimiters.
 pub fn format_content(original: &str) -> Result<String> {
+    // Normalize CRLF to LF so byte-offset arithmetic works correctly.
+    let content = original.replace("\r\n", "\n");
+
     // Split into frontmatter and body.
-    if !original.starts_with("---") {
+    if !content.starts_with("---") {
         return Err(AigentError::Parse {
             message: "SKILL.md must start with --- delimiter".into(),
         });
     }
 
-    let after_first = &original[3..];
+    let after_first = &content[3..];
     let close_pos = after_first.find("\n---\n").or_else(|| {
         // Handle case where closing --- is at end of file.
         if after_first.ends_with("\n---") {
@@ -111,19 +114,22 @@ fn format_frontmatter(yaml: &str) -> String {
     let mut ordered: Vec<(usize, &YamlBlock)> = Vec::new();
     let mut unknown: Vec<&YamlBlock> = Vec::new();
     let mut header_comments: Vec<&YamlBlock> = Vec::new();
+    let mut interleaved_comments: Vec<&YamlBlock> = Vec::new();
+    let mut seen_key = false;
 
     for block in &blocks {
         match block {
             YamlBlock::Comment(_) => {
-                // Collect comments that appear before any key.
-                if ordered.is_empty() && unknown.is_empty() {
+                if !seen_key {
+                    // Comments before any key are header comments.
                     header_comments.push(block);
+                } else {
+                    // Comments between keys stay anchored (not attached to any key).
+                    interleaved_comments.push(block);
                 }
-                // Comments between keys are attached to the following key
-                // in the original order — we preserve them by keeping them
-                // in the unknown list.
             }
             YamlBlock::Key { name, .. } => {
+                seen_key = true;
                 if let Some(pos) = KEY_ORDER.iter().position(|k| k == name) {
                     ordered.push((pos, block));
                 } else {
@@ -162,6 +168,14 @@ fn format_frontmatter(yaml: &str) -> String {
     for (_, block) in &ordered {
         if let YamlBlock::Key { raw, .. } = block {
             lines.push(raw.clone());
+        }
+    }
+
+    // Emit interleaved comments in their original order, anchored between
+    // known and unknown keys.
+    for block in &interleaved_comments {
+        if let YamlBlock::Comment(text) = block {
+            lines.push(text.clone());
         }
     }
 
@@ -214,14 +228,20 @@ fn parse_yaml_blocks(yaml: &str) -> Vec<YamlBlock> {
             continue;
         }
 
-        if line.starts_with('#') && current_key.is_none() {
-            // Standalone comment before any key.
+        if line.starts_with('#') {
+            if let Some((name, lines)) = current_key.take() {
+                // Flush preceding key block before the standalone comment.
+                blocks.push(YamlBlock::Key {
+                    name,
+                    raw: lines.join("\n"),
+                });
+            }
             blocks.push(YamlBlock::Comment(line.to_string()));
             continue;
         }
 
-        if line.starts_with(' ') || line.starts_with('#') {
-            // Indented line or inline comment — continuation of current key.
+        if line.starts_with(' ') {
+            // Indented line — continuation of current key.
             if let Some((_, ref mut lines)) = current_key {
                 lines.push(line.to_string());
             }
@@ -413,5 +433,160 @@ mod tests {
         let input = "---\n---\nBody.\n";
         let result = format_content(input).unwrap();
         assert!(result.contains("---\n\n---\n"));
+    }
+
+    #[test]
+    fn format_crlf_produces_lf_output() {
+        let crlf = "---\r\nname: my-skill\r\ndescription: A skill\r\n---\r\n\r\nBody text.\r\n";
+        let result = format_content(crlf).unwrap();
+        assert!(
+            !result.contains("\r\n"),
+            "output should not contain CRLF line endings"
+        );
+        assert!(result.contains("name: my-skill"));
+        assert!(result.contains("description: A skill"));
+        assert!(result.contains("Body text.\n"));
+    }
+
+    #[test]
+    fn format_mixed_lf_crlf_normalizes_to_lf() {
+        let mixed = "---\nname: my-skill\r\ndescription: A skill\n---\r\n\nBody text.\r\n";
+        let result = format_content(mixed).unwrap();
+        assert!(
+            !result.contains("\r\n"),
+            "output should not contain any CRLF after normalization"
+        );
+        assert!(result.contains("name: my-skill"));
+        assert!(result.contains("description: A skill"));
+    }
+
+    #[test]
+    fn format_lf_input_unchanged_by_normalization() {
+        let lf = "---\nname: my-skill\ndescription: A skill\n---\nBody text.\n";
+        let result = format_content(lf).unwrap();
+        assert_eq!(result, lf, "LF-only input should produce identical output");
+    }
+
+    #[test]
+    fn format_crlf_is_idempotent_after_normalization() {
+        let crlf = "---\r\nname: my-skill\r\ndescription: A skill\r\n---\r\n\r\nBody text.\r\n";
+        let first = format_content(crlf).unwrap();
+        let second = format_content(&first).unwrap();
+        assert_eq!(
+            first, second,
+            "formatting should be idempotent after CRLF normalization"
+        );
+    }
+
+    // ── Comment handling tests ───────────────────────────────────────
+
+    #[test]
+    fn standalone_comment_between_keys_stays_in_position() {
+        let input = "---\ndescription: Does things\n# About the name\nname: my-skill\n---\nBody.\n";
+        let result = format_content(input).unwrap();
+        let lines: Vec<&str> = result.lines().collect();
+        let name_pos = lines.iter().position(|l| l.starts_with("name:")).unwrap();
+        let desc_pos = lines
+            .iter()
+            .position(|l| l.starts_with("description:"))
+            .unwrap();
+        let comment_pos = lines.iter().position(|l| *l == "# About the name").unwrap();
+        assert!(
+            name_pos < desc_pos,
+            "name should come before description after reorder"
+        );
+        assert!(
+            comment_pos > name_pos,
+            "comment should appear after name (not attached to description)"
+        );
+    }
+
+    #[test]
+    fn inline_comment_stays_with_key() {
+        let input =
+            "---\nmetadata:\n  version: '1.0'\nname: my-skill  # the name\ndescription: Does things\n---\nBody.\n";
+        let result = format_content(input).unwrap();
+        assert!(
+            result.contains("name: my-skill  # the name"),
+            "inline comment should stay with its key value"
+        );
+    }
+
+    #[test]
+    fn multiple_consecutive_standalone_comments_preserved() {
+        let input =
+            "---\nname: my-skill\n# line 1\n# line 2\ndescription: Does things\n---\nBody.\n";
+        let result = format_content(input).unwrap();
+        assert!(
+            result.contains("# line 1"),
+            "first standalone comment should be preserved"
+        );
+        assert!(
+            result.contains("# line 2"),
+            "second standalone comment should be preserved"
+        );
+        let lines: Vec<&str> = result.lines().collect();
+        let c1_pos = lines.iter().position(|l| *l == "# line 1").unwrap();
+        let c2_pos = lines.iter().position(|l| *l == "# line 2").unwrap();
+        assert_eq!(
+            c2_pos,
+            c1_pos + 1,
+            "consecutive comments should remain adjacent"
+        );
+    }
+
+    #[test]
+    fn indented_comment_stays_with_preceding_key() {
+        let input = "---\nname: my-skill\ndescription: |\n  A description.\n  # This is inside the block.\nmetadata:\n  version: '1.0'\n---\nBody.\n";
+        let result = format_content(input).unwrap();
+        let lines: Vec<&str> = result.lines().collect();
+        let desc_pos = lines
+            .iter()
+            .position(|l| l.starts_with("description:"))
+            .unwrap();
+        let indented_comment_pos = lines
+            .iter()
+            .position(|l| l.contains("# This is inside the block."))
+            .unwrap();
+        let meta_pos = lines
+            .iter()
+            .position(|l| l.starts_with("metadata:"))
+            .unwrap();
+        assert!(
+            indented_comment_pos > desc_pos && indented_comment_pos < meta_pos,
+            "indented comment should remain between description and metadata"
+        );
+    }
+
+    #[test]
+    fn header_comment_above_first_key_preserved() {
+        let input = "---\n# This is a skill file\nname: my-skill\ndescription: Does things\nmetadata:\n  version: '1.0'\n---\nBody.\n";
+        let result = format_content(input).unwrap();
+        let lines: Vec<&str> = result.lines().collect();
+        let comment_pos = lines
+            .iter()
+            .position(|l| *l == "# This is a skill file")
+            .unwrap();
+        let name_pos = lines.iter().position(|l| l.starts_with("name:")).unwrap();
+        assert!(
+            comment_pos < name_pos,
+            "header comment (pos {comment_pos}) should appear before name (pos {name_pos})"
+        );
+        assert_eq!(
+            comment_pos, 1,
+            "header comment should be on line 1 (after ---)"
+        );
+    }
+
+    #[test]
+    fn comment_handling_is_idempotent() {
+        let input =
+            "---\n# Header\nname: my-skill\n# Between\ndescription: Does things\n---\nBody.\n";
+        let first = format_content(input).unwrap();
+        let second = format_content(&first).unwrap();
+        assert_eq!(
+            first, second,
+            "formatting with comments should be idempotent"
+        );
     }
 }
