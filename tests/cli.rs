@@ -236,15 +236,15 @@ fn to_prompt_mixed_valid_and_invalid() {
     assert!(stdout.contains("<name>good-skill</name>"));
 }
 
-// ── build ──────────────────────────────────────────────────────────
+// ── new (skill creation) ──────────────────────────────────────────
 
 #[test]
-fn build_deterministic_creates_dir() {
+fn new_deterministic_creates_dir() {
     let parent = tempdir().unwrap();
     let dir = parent.path().join("processing-pdf-files");
     aigent()
         .args([
-            "build",
+            "new",
             "Process PDF files",
             "--no-llm",
             "--dir",
@@ -257,12 +257,12 @@ fn build_deterministic_creates_dir() {
 }
 
 #[test]
-fn build_with_name_override() {
+fn new_with_name_override() {
     let parent = tempdir().unwrap();
     let dir = parent.path().join("my-pdf-tool");
     aigent()
         .args([
-            "build",
+            "new",
             "Process PDF files",
             "--no-llm",
             "--name",
@@ -276,13 +276,13 @@ fn build_with_name_override() {
 }
 
 #[test]
-fn build_with_dir_override() {
+fn new_with_dir_override() {
     let parent = tempdir().unwrap();
     let dir = parent.path().join("custom-output");
     // Use --name matching the dir name so validation passes.
     aigent()
         .args([
-            "build",
+            "new",
             "Process PDF files",
             "--no-llm",
             "--name",
@@ -336,13 +336,13 @@ fn init_with_dir_arg() {
 }
 
 #[test]
-fn built_skill_passes_validate() {
+fn new_skill_passes_validate() {
     let parent = tempdir().unwrap();
     let dir = parent.path().join("roundtrip-skill");
-    // Build the skill.
+    // Create the skill.
     aigent()
         .args([
-            "build",
+            "new",
             "Process PDF files",
             "--no-llm",
             "--name",
@@ -481,24 +481,24 @@ fn validate_target_permissive_no_unknown_field_warnings() {
         .stderr(predicate::str::is_empty());
 }
 
-// ── --lint flag ────────────────────────────────────────────────────
+// ── check command (validate + semantic) ───────────────────────────
 
 #[test]
-fn validate_with_lint_shows_info_diagnostics() {
+fn check_shows_info_diagnostics() {
     // Name is not gerund, description has no trigger phrase and is vague.
     let (_parent, dir) = make_skill_dir(
         "helper",
         "---\nname: helper\ndescription: Helps\n---\nBody.\n",
     );
     aigent()
-        .args(["validate", dir.to_str().unwrap(), "--lint"])
+        .args(["check", dir.to_str().unwrap()])
         .assert()
-        .success() // lint never causes failure
+        .success() // lint info never causes failure
         .stderr(predicate::str::contains("info:"));
 }
 
 #[test]
-fn validate_without_lint_no_info_diagnostics() {
+fn validate_without_check_no_info_diagnostics() {
     let (_parent, dir) = make_skill_dir(
         "helper",
         "---\nname: helper\ndescription: Helps\n---\nBody.\n",
@@ -510,14 +510,36 @@ fn validate_without_lint_no_info_diagnostics() {
         .stderr(predicate::str::contains("info:").not());
 }
 
-// ── lint subcommand ────────────────────────────────────────────────
+#[test]
+fn check_no_validate_skips_conformance() {
+    // A skill with invalid name format — should fail validate, but
+    // --no-validate skips conformance so only semantic checks run.
+    let (_parent, dir) = make_skill_dir(
+        "UPPERCASE",
+        "---\nname: UPPERCASE\ndescription: Helps with things\n---\nBody.\n",
+    );
+    // Without --no-validate: fails because name has uppercase.
+    aigent()
+        .args(["check", dir.to_str().unwrap()])
+        .assert()
+        .failure();
+    // With --no-validate: only semantic checks, which are info-level.
+    aigent()
+        .args(["check", dir.to_str().unwrap(), "--no-validate"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("info:"));
+}
+
+// ── lint alias (maps to check) ────────────────────────────────────
 
 #[test]
-fn lint_subcommand_shows_info() {
+fn lint_alias_shows_info() {
     let (_parent, dir) = make_skill_dir(
         "helper",
         "---\nname: helper\ndescription: Helps\n---\nBody.\n",
     );
+    // `lint` is an alias for `check` — runs validate + semantic checks.
     aigent()
         .args(["lint", dir.to_str().unwrap()])
         .assert()
@@ -526,34 +548,37 @@ fn lint_subcommand_shows_info() {
 }
 
 #[test]
-fn lint_subcommand_perfect_skill_no_output() {
+fn check_perfect_skill_no_output() {
     let (_parent, dir) = make_skill_dir(
         "processing-pdfs",
         "---\nname: processing-pdfs\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
     );
     aigent()
-        .args(["lint", dir.to_str().unwrap()])
+        .args(["check", dir.to_str().unwrap()])
         .assert()
         .success()
         .stderr(predicate::str::is_empty());
 }
 
 #[test]
-fn lint_subcommand_json_format() {
+fn check_json_format() {
     let (_parent, dir) = make_skill_dir(
         "helper",
         "---\nname: helper\ndescription: Helps\n---\nBody.\n",
     );
     let output = aigent()
-        .args(["lint", dir.to_str().unwrap(), "--format", "json"])
+        .args(["check", dir.to_str().unwrap(), "--format", "json"])
         .output()
         .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    // Check outputs array-of-objects: [{"path": ..., "diagnostics": [...]}].
     let arr = json.as_array().unwrap();
     assert!(!arr.is_empty());
-    assert!(arr.iter().all(|d| d["severity"] == "info"));
+    let diags = arr[0]["diagnostics"].as_array().unwrap();
+    assert!(!diags.is_empty());
+    assert!(diags.iter().all(|d| d["severity"] == "info"));
 }
 
 // ── multi-dir validation ───────────────────────────────────────────
@@ -1137,13 +1162,13 @@ fn doc_recursive_discovers_nested_skills() {
 // ── M12: test subcommand ─────────────────────────────────────────
 
 #[test]
-fn test_skill_shows_activation_status() {
+fn probe_skill_shows_activation_status() {
     let (_parent, dir) = make_skill_dir(
         "test-skill-activate",
         "---\nname: test-skill-activate\ndescription: Processes PDF files and extracts text\n---\nBody.\n",
     );
     aigent()
-        .args(["test", dir.to_str().unwrap(), "process PDF files"])
+        .args(["probe", dir.to_str().unwrap(), "process PDF files"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Activation:"))
@@ -1151,27 +1176,27 @@ fn test_skill_shows_activation_status() {
 }
 
 #[test]
-fn test_skill_no_match_query() {
+fn probe_skill_no_match_query() {
     let (_parent, dir) = make_skill_dir(
         "test-no-match",
         "---\nname: test-no-match\ndescription: Manages database connections\n---\nBody.\n",
     );
     aigent()
-        .args(["test", dir.to_str().unwrap(), "deploy kubernetes cluster"])
+        .args(["probe", dir.to_str().unwrap(), "deploy kubernetes cluster"])
         .assert()
         .success()
         .stdout(predicate::str::contains("NONE"));
 }
 
 #[test]
-fn test_skill_json_format() {
+fn probe_skill_json_format() {
     let (_parent, dir) = make_skill_dir(
         "test-json",
         "---\nname: test-json\ndescription: Processes PDF files\n---\nBody.\n",
     );
     let output = aigent()
         .args([
-            "test",
+            "probe",
             dir.to_str().unwrap(),
             "process PDF",
             "--format",
@@ -1187,9 +1212,9 @@ fn test_skill_json_format() {
 }
 
 #[test]
-fn test_skill_missing_dir_exits_nonzero() {
+fn probe_skill_missing_dir_exits_nonzero() {
     aigent()
-        .args(["test", "/nonexistent/skill", "some query"])
+        .args(["probe", "/nonexistent/skill", "some query"])
         .assert()
         .failure();
 }
@@ -1251,6 +1276,443 @@ fn upgrade_apply_modifies_skill() {
     assert!(content.contains("compatibility"));
 }
 
+#[test]
+fn upgrade_full_reports_suggestions() {
+    let (_parent, dir) = make_skill_dir(
+        "upgrade-full-test",
+        "---\nname: upgrade-full-test\ndescription: A basic skill\n---\nBody.\n",
+    );
+    // Without --apply, exits 1 when suggestions exist (same as upgrade without --full).
+    aigent()
+        .args(["upgrade", dir.to_str().unwrap(), "--full"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("compatibility"))
+        .stderr(predicate::str::contains("metadata"));
+}
+
+#[test]
+fn upgrade_full_apply_fixes_then_upgrades() {
+    let (_parent, dir) = make_skill_dir(
+        "upgrade-full-apply",
+        "---\nname: upgrade-full-apply\ndescription: A basic skill\n---\nBody.\n",
+    );
+    aigent()
+        .args(["upgrade", dir.to_str().unwrap(), "--full", "--apply"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Applied"));
+    // Verify the file was updated.
+    let content = fs::read_to_string(dir.join("SKILL.md")).unwrap();
+    assert!(content.contains("compatibility"));
+}
+
+// ── M13: YAML parser edge cases (#81) ────────────────────────────
+
+#[test]
+fn upgrade_apply_preserves_existing_metadata_keys() {
+    // Skill has metadata.version but NOT metadata.author — apply should add only author.
+    let (_parent, dir) = make_skill_dir(
+        "upgrade-partial-meta",
+        "---\nname: upgrade-partial-meta\ndescription: A basic skill\nmetadata:\n  version: '1.0.0'\n---\nBody.\n",
+    );
+    aigent()
+        .args(["upgrade", dir.to_str().unwrap(), "--apply"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Applied"));
+    let content = fs::read_to_string(dir.join("SKILL.md")).unwrap();
+    // version should still be there (preserved).
+    assert!(content.contains("version: '1.0.0'"));
+    // author should have been added.
+    assert!(content.contains("author: unknown"));
+    // Should still be valid YAML after modifications.
+    aigent()
+        .args(["validate", dir.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[test]
+fn upgrade_apply_respects_four_space_indentation() {
+    // Skill uses 4-space indentation — upgrade should detect and use 4 spaces.
+    let (_parent, dir) = make_skill_dir(
+        "upgrade-4sp-indent",
+        "---\nname: upgrade-4sp-indent\ndescription: A basic skill\nmetadata:\n    version: '1.0.0'\n---\nBody.\n",
+    );
+    aigent()
+        .args(["upgrade", dir.to_str().unwrap(), "--apply"])
+        .assert()
+        .success();
+    let content = fs::read_to_string(dir.join("SKILL.md")).unwrap();
+    // The added author should use 4-space indentation to match existing style.
+    assert!(
+        content.contains("    author: unknown"),
+        "Expected 4-space indented author line, got:\n{content}"
+    );
+}
+
+#[test]
+fn upgrade_apply_with_comments_in_frontmatter() {
+    // Frontmatter has comment lines — the parser should skip them when locating metadata.
+    let (_parent, dir) = make_skill_dir(
+        "upgrade-comments",
+        "---\n# This is a comment\nname: upgrade-comments\ndescription: A basic skill\n# Another comment\nmetadata:\n  version: '1.0.0'\n---\nBody.\n",
+    );
+    aigent()
+        .args(["upgrade", dir.to_str().unwrap(), "--apply"])
+        .assert()
+        .success();
+    let content = fs::read_to_string(dir.join("SKILL.md")).unwrap();
+    // Comments should be preserved.
+    assert!(content.contains("# This is a comment"));
+    assert!(content.contains("# Another comment"));
+    // author should have been inserted.
+    assert!(content.contains("author: unknown"));
+}
+
+#[test]
+fn upgrade_apply_no_metadata_block_creates_one() {
+    // Skill has no metadata block at all — apply should add the whole block.
+    let (_parent, dir) = make_skill_dir(
+        "upgrade-no-meta",
+        "---\nname: upgrade-no-meta\ndescription: A basic skill\n---\nBody.\n",
+    );
+    aigent()
+        .args(["upgrade", dir.to_str().unwrap(), "--apply"])
+        .assert()
+        .success();
+    let content = fs::read_to_string(dir.join("SKILL.md")).unwrap();
+    // Should create a metadata block with both version and author.
+    assert!(content.contains("metadata:"));
+    assert!(content.contains("version: '0.1.0'"));
+    assert!(content.contains("author: unknown"));
+    // Should also add compatibility.
+    assert!(content.contains("compatibility: claude-code"));
+    // The resulting file should still be valid.
+    aigent()
+        .args(["validate", dir.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+// ── M13: CLI renames and aliases (#76) ───────────────────────────
+
+#[test]
+fn new_command_creates_skill() {
+    let parent = tempdir().unwrap();
+    aigent()
+        .args([
+            "new",
+            "Process PDF files",
+            "--no-llm",
+            "--dir",
+            parent.path().join("processing-pdf-files").to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created skill"));
+}
+
+#[test]
+fn create_alias_produces_same_as_new() {
+    let parent = tempdir().unwrap();
+    // `create` is an alias for `new` — should produce same result.
+    aigent()
+        .args([
+            "create",
+            "Analyze logs",
+            "--no-llm",
+            "--dir",
+            parent.path().join("analyzing-logs").to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created skill"));
+}
+
+#[test]
+fn prompt_command_works() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: A test skill\n---\nBody.\n",
+    );
+    aigent()
+        .args(["prompt", dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<available_skills>"));
+}
+
+#[test]
+fn to_prompt_alias_works() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: A test skill\n---\nBody.\n",
+    );
+    aigent()
+        .args(["to-prompt", dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<available_skills>"));
+}
+
+#[test]
+fn probe_command_shows_activation() {
+    let (_parent, dir) = make_skill_dir(
+        "processing-pdf-files",
+        "---\nname: processing-pdf-files\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
+    );
+    aigent()
+        .args(["probe", dir.to_str().unwrap(), "process PDF files"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Activation:"));
+}
+
+#[test]
+fn probe_command_accepts_query() {
+    let (_parent, dir) = make_skill_dir(
+        "processing-pdf-files",
+        "---\nname: processing-pdf-files\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
+    );
+    // `probe` works directly (no `test` alias — `test` is now the fixture runner).
+    aigent()
+        .args(["probe", dir.to_str().unwrap(), "process PDF files"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Activation:"));
+}
+
+#[test]
+fn check_runs_validate_and_lint() {
+    // A skill with a lint issue (no trigger phrase) but valid spec.
+    let (_parent, dir) = make_skill_dir(
+        "helper",
+        "---\nname: helper\ndescription: Helps with things\n---\nBody.\n",
+    );
+    // `check` should run both validate (passes) and semantic lint (finds issues).
+    aigent()
+        .args(["check", dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("info:"));
+}
+
+#[test]
+fn lint_alias_maps_to_check() {
+    let (_parent, dir) = make_skill_dir(
+        "helper",
+        "---\nname: helper\ndescription: Helps with things\n---\nBody.\n",
+    );
+    // `lint` is an alias for `check`.
+    aigent()
+        .args(["lint", dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("info:"));
+}
+
+// ── M13: build (plugin assembly) (#83) ───────────────────────────
+
+#[test]
+fn build_assembles_single_skill() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: Does things\n---\nBody.\n",
+    );
+    let output = tempdir().unwrap();
+    let out_dir = output.path().join("plugin");
+    aigent()
+        .args([
+            "build",
+            dir.to_str().unwrap(),
+            "--output",
+            out_dir.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Assembled 1 skill"));
+    assert!(out_dir.join("plugin.json").exists());
+    assert!(out_dir.join("skills/my-skill/SKILL.md").exists());
+}
+
+#[test]
+fn build_assembles_multiple_skills() {
+    let (_p1, d1) = make_skill_dir(
+        "skill-one",
+        "---\nname: skill-one\ndescription: First\n---\nBody.\n",
+    );
+    let (_p2, d2) = make_skill_dir(
+        "skill-two",
+        "---\nname: skill-two\ndescription: Second\n---\nBody.\n",
+    );
+    let output = tempdir().unwrap();
+    let out_dir = output.path().join("plugin");
+    aigent()
+        .args([
+            "build",
+            d1.to_str().unwrap(),
+            d2.to_str().unwrap(),
+            "--output",
+            out_dir.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Assembled 2 skill"));
+}
+
+#[test]
+fn build_with_validate_rejects_invalid() {
+    let (_parent, dir) = make_skill_dir(
+        "bad-skill",
+        "---\ndescription: Missing name field\n---\nBody.\n",
+    );
+    let output = tempdir().unwrap();
+    let out_dir = output.path().join("plugin");
+    aigent()
+        .args([
+            "build",
+            dir.to_str().unwrap(),
+            "--output",
+            out_dir.to_str().unwrap(),
+            "--validate",
+        ])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn build_plugin_json_valid() {
+    let (_parent, dir) = make_skill_dir(
+        "test-skill",
+        "---\nname: test-skill\ndescription: Does things\n---\nBody.\n",
+    );
+    let output = tempdir().unwrap();
+    let out_dir = output.path().join("plugin");
+    aigent()
+        .args([
+            "build",
+            dir.to_str().unwrap(),
+            "--output",
+            out_dir.to_str().unwrap(),
+            "--name",
+            "my-plugin",
+        ])
+        .assert()
+        .success();
+    let json_str = fs::read_to_string(out_dir.join("plugin.json")).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+    assert_eq!(json["name"], "my-plugin");
+    assert_eq!(json["version"], "0.1.0");
+}
+
+// ── M13: fmt subcommand (#76) ────────────────────────────────────
+
+#[test]
+fn fmt_already_formatted_no_change() {
+    // Keys are already in canonical order.
+    let (_parent, dir) = make_skill_dir(
+        "formatted-skill",
+        "---\nname: formatted-skill\ndescription: Does things\ncompatibility: claude-code\nmetadata:\n  version: '1.0'\n---\nBody.\n",
+    );
+    aigent()
+        .args(["fmt", dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Formatted").not());
+}
+
+#[test]
+fn fmt_reorders_keys() {
+    // metadata before name — should be reordered.
+    let (_parent, dir) = make_skill_dir(
+        "unformatted-skill",
+        "---\nmetadata:\n  version: '1.0'\nname: unformatted-skill\ndescription: Does things\n---\nBody.\n",
+    );
+    aigent()
+        .args(["fmt", dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Formatted"));
+    // Verify the file was reordered.
+    let content = fs::read_to_string(dir.join("SKILL.md")).unwrap();
+    let name_pos = content.find("name:").unwrap();
+    let meta_pos = content.find("metadata:").unwrap();
+    assert!(
+        name_pos < meta_pos,
+        "name should come before metadata after fmt"
+    );
+}
+
+#[test]
+fn fmt_check_unformatted_exits_nonzero() {
+    let (_parent, dir) = make_skill_dir(
+        "check-skill",
+        "---\nmetadata:\n  version: '1.0'\nname: check-skill\ndescription: Does things\n---\nBody.\n",
+    );
+    aigent()
+        .args(["fmt", dir.to_str().unwrap(), "--check"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Would reformat"));
+    // File should NOT have been modified.
+    let content = fs::read_to_string(dir.join("SKILL.md")).unwrap();
+    assert!(
+        content.starts_with("---\nmetadata:"),
+        "file should be unchanged in --check mode"
+    );
+}
+
+#[test]
+fn fmt_check_formatted_exits_zero() {
+    let (_parent, dir) = make_skill_dir(
+        "clean-skill",
+        "---\nname: clean-skill\ndescription: Does things\n---\nBody.\n",
+    );
+    aigent()
+        .args(["fmt", dir.to_str().unwrap(), "--check"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn fmt_preserves_values_after_reorder() {
+    let (_parent, dir) = make_skill_dir(
+        "preserve-test",
+        "---\ncompatibility: claude-code\nname: preserve-test\ndescription: >-\n  A multiline description\n  that spans two lines\nmetadata:\n  version: '1.0'\n  author: test\n---\n# Body\n\nParagraph.\n",
+    );
+    aigent()
+        .args(["fmt", dir.to_str().unwrap()])
+        .assert()
+        .success();
+    let content = fs::read_to_string(dir.join("SKILL.md")).unwrap();
+    // All values should be preserved.
+    assert!(content.contains("name: preserve-test"));
+    assert!(content.contains("A multiline description"));
+    assert!(content.contains("compatibility: claude-code"));
+    assert!(content.contains("version: '1.0'"));
+    assert!(content.contains("# Body"));
+    // Should still be valid.
+    aigent()
+        .args(["validate", dir.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[test]
+fn format_alias_works() {
+    let (_parent, dir) = make_skill_dir(
+        "alias-test",
+        "---\nname: alias-test\ndescription: Does things\n---\nBody.\n",
+    );
+    // `format` is an alias for `fmt`.
+    aigent()
+        .args(["format", dir.to_str().unwrap(), "--check"])
+        .assert()
+        .success();
+}
+
 // ── M12: watch mode (no-feature build) ───────────────────────────
 
 #[test]
@@ -1269,13 +1731,13 @@ fn watch_flag_without_feature_exits_with_message() {
 // ── M11: build --interactive flag ─────────────────────────────────
 
 #[test]
-fn build_interactive_flag_accepted() {
+fn new_interactive_flag_accepted() {
     // Just verify the flag is accepted (with piped "n" to cancel).
     let parent = tempdir().unwrap();
     let dir = parent.path().join("interactive-cli");
     aigent()
         .args([
-            "build",
+            "new",
             "Process PDF files and extract text from documents",
             "--no-llm",
             "--name",
@@ -1288,4 +1750,113 @@ fn build_interactive_flag_accepted() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("cancelled"));
+}
+
+// ── M13: test subcommand (fixture-based) ─────────────────────────
+
+#[test]
+fn test_run_suite_all_pass() {
+    let (_parent, dir) = make_skill_dir(
+        "test-suite-pass",
+        "---\nname: test-suite-pass\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
+    );
+    fs::write(
+        dir.join("tests.yml"),
+        "queries:\n  - input: \"process PDF files\"\n    should_match: true\n  - input: \"deploy kubernetes\"\n    should_match: false\n",
+    )
+    .unwrap();
+    aigent()
+        .args(["test", dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("2 passed, 0 failed"));
+}
+
+#[test]
+fn test_run_suite_with_failure() {
+    let (_parent, dir) = make_skill_dir(
+        "test-suite-fail",
+        "---\nname: test-suite-fail\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
+    );
+    fs::write(
+        dir.join("tests.yml"),
+        "queries:\n  - input: \"process PDF files\"\n    should_match: false\n",
+    )
+    .unwrap();
+    aigent()
+        .args(["test", dir.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("0 passed, 1 failed"));
+}
+
+#[test]
+fn test_missing_tests_yml_exits_nonzero() {
+    let (_parent, dir) = make_skill_dir(
+        "test-no-fixture",
+        "---\nname: test-no-fixture\ndescription: Does things\n---\nBody.\n",
+    );
+    aigent()
+        .args(["test", dir.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no tests.yml"));
+}
+
+#[test]
+fn test_generate_creates_tests_yml() {
+    let (_parent, dir) = make_skill_dir(
+        "test-gen",
+        "---\nname: test-gen\ndescription: Processes documents. Use when handling files.\n---\nBody.\n",
+    );
+    aigent()
+        .args(["test", dir.to_str().unwrap(), "--generate"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Generated"));
+    let fixture_path = dir.join("tests.yml");
+    assert!(fixture_path.exists());
+    let content = fs::read_to_string(&fixture_path).unwrap();
+    assert!(content.contains("queries:"));
+    assert!(content.contains("should_match: true"));
+    assert!(content.contains("should_match: false"));
+}
+
+#[test]
+fn test_generate_skips_existing_tests_yml() {
+    let (_parent, dir) = make_skill_dir(
+        "test-gen-exists",
+        "---\nname: test-gen-exists\ndescription: Does things\n---\nBody.\n",
+    );
+    fs::write(dir.join("tests.yml"), "queries: []\n").unwrap();
+    aigent()
+        .args(["test", dir.to_str().unwrap(), "--generate"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("already exists"));
+    // Content should be unchanged.
+    let content = fs::read_to_string(dir.join("tests.yml")).unwrap();
+    assert_eq!(content, "queries: []\n");
+}
+
+#[test]
+fn test_json_format_outputs_suite_result() {
+    let (_parent, dir) = make_skill_dir(
+        "test-json-suite",
+        "---\nname: test-json-suite\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
+    );
+    fs::write(
+        dir.join("tests.yml"),
+        "queries:\n  - input: \"process PDF files\"\n    should_match: true\n",
+    )
+    .unwrap();
+    let output = aigent()
+        .args(["test", dir.to_str().unwrap(), "--format", "json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["passed"], 1);
+    assert_eq!(json["failed"], 0);
 }

@@ -79,7 +79,7 @@ impl From<PromptOutputFormat> for aigent::prompt::PromptFormat {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Validate skill directories
+    /// Validate skill directories (spec conformance)
     Validate {
         /// Paths to skill directories or SKILL.md files
         skill_dirs: Vec<PathBuf>,
@@ -89,9 +89,6 @@ enum Commands {
         /// Validation target profile
         #[arg(long, value_enum, default_value_t = Target::Standard)]
         target: Target,
-        /// Run semantic lint checks
-        #[arg(long)]
-        lint: bool,
         /// Run directory structure checks
         #[arg(long)]
         structure: bool,
@@ -105,13 +102,29 @@ enum Commands {
         #[arg(long)]
         watch: bool,
     },
-    /// Run semantic lint checks on a skill directory
-    Lint {
-        /// Path to skill directory or SKILL.md file
-        skill_dir: PathBuf,
+    /// Run validate + semantic quality checks (superset of validate)
+    #[command(alias = "lint")]
+    Check {
+        /// Paths to skill directories or SKILL.md files
+        skill_dirs: Vec<PathBuf>,
         /// Output format
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
+        /// Validation target profile
+        #[arg(long, value_enum, default_value_t = Target::Standard)]
+        target: Target,
+        /// Skip spec conformance checks (semantic quality only)
+        #[arg(long)]
+        no_validate: bool,
+        /// Run directory structure checks
+        #[arg(long)]
+        structure: bool,
+        /// Discover skills recursively
+        #[arg(long)]
+        recursive: bool,
+        /// Apply automatic fixes for fixable issues
+        #[arg(long)]
+        apply_fixes: bool,
     },
     /// Read skill properties as JSON
     ReadProperties {
@@ -120,7 +133,8 @@ enum Commands {
         skill_dir: PathBuf,
     },
     /// Generate prompt from skill directories
-    ToPrompt {
+    #[command(alias = "to-prompt")]
+    Prompt {
         /// Paths to skill directories
         skill_dirs: Vec<PathBuf>,
         /// Output format
@@ -133,8 +147,9 @@ enum Commands {
         #[arg(long)]
         output: Option<PathBuf>,
     },
-    /// Build a skill from a natural language description
-    Build {
+    /// Create a new skill from a natural language description
+    #[command(alias = "create")]
+    New {
         /// What the skill should do
         purpose: String,
         /// Override the derived skill name
@@ -170,8 +185,8 @@ enum Commands {
         #[arg(long)]
         recursive: bool,
     },
-    /// Test a skill against a sample user query
-    Test {
+    /// Probe a skill's activation surface with a sample query
+    Probe {
         /// Path to skill directory or SKILL.md file
         #[arg(name = "skill-dir")]
         skill_dir: PathBuf,
@@ -182,6 +197,34 @@ enum Commands {
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
     },
+    /// Assemble skills into a Claude Code plugin
+    Build {
+        /// Paths to skill directories
+        skill_dirs: Vec<PathBuf>,
+        /// Output directory for the assembled plugin
+        #[arg(long, default_value = "./dist")]
+        output: PathBuf,
+        /// Override plugin name
+        #[arg(long)]
+        name: Option<String>,
+        /// Run validation on assembled skills
+        #[arg(long)]
+        validate: bool,
+    },
+    /// Run fixture-based test suite from tests.yml
+    Test {
+        /// Paths to skill directories
+        skill_dirs: Vec<PathBuf>,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+        /// Discover skills recursively
+        #[arg(long)]
+        recursive: bool,
+        /// Generate a starter tests.yml for skills that lack one
+        #[arg(long)]
+        generate: bool,
+    },
     /// Check a skill for upgrade opportunities
     Upgrade {
         /// Path to skill directory or SKILL.md file
@@ -190,9 +233,24 @@ enum Commands {
         /// Apply automatic upgrades
         #[arg(long)]
         apply: bool,
+        /// Run validate + lint before upgrade (with --apply, also fix errors first)
+        #[arg(long)]
+        full: bool,
         /// Output format
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
+    },
+    /// Format SKILL.md files (canonical key order, clean whitespace)
+    #[command(alias = "format")]
+    Fmt {
+        /// Paths to skill directories or SKILL.md files
+        skill_dirs: Vec<PathBuf>,
+        /// Check formatting without modifying files (exit 1 if unformatted)
+        #[arg(long)]
+        check: bool,
+        /// Discover skills recursively
+        #[arg(long)]
+        recursive: bool,
     },
     /// Initialize a skill directory with a template SKILL.md
     Init {
@@ -217,7 +275,6 @@ fn main() {
             skill_dirs,
             format,
             target,
-            lint,
             structure,
             recursive,
             apply_fixes,
@@ -230,7 +287,6 @@ fn main() {
                     &skill_dirs,
                     format,
                     target,
-                    lint,
                     structure,
                     recursive,
                     apply_fixes,
@@ -272,14 +328,6 @@ fn main() {
                         Err(e) => {
                             eprintln!("warning: could not apply fixes to {}: {e}", dir.display());
                         }
-                    }
-                }
-
-                // Append lint results if requested.
-                if lint {
-                    if let Ok(props) = aigent::read_properties(dir) {
-                        let body = read_body(dir);
-                        diags.extend(aigent::lint(&props, &body));
                     }
                 }
 
@@ -373,32 +421,132 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Some(Commands::Lint { skill_dir, format }) => {
-            let dir = resolve_skill_dir(&skill_dir);
-            let diags = match aigent::read_properties(&dir) {
-                Ok(props) => {
-                    let body = read_body(&dir);
-                    aigent::lint(&props, &body)
+        Some(Commands::Check {
+            skill_dirs,
+            format,
+            target,
+            no_validate,
+            structure,
+            recursive,
+            apply_fixes,
+        }) => {
+            let dirs = resolve_dirs(&skill_dirs, recursive);
+            if dirs.is_empty() {
+                if recursive {
+                    eprintln!("No SKILL.md files found under the specified path(s).");
+                } else {
+                    eprintln!("Usage: aigent check <skill-dir> [<skill-dir>...]");
                 }
-                Err(e) => {
-                    eprintln!("aigent lint: {e}");
-                    std::process::exit(1);
+                std::process::exit(1);
+            }
+
+            let mut all_diags: Vec<(PathBuf, Vec<Diagnostic>)> = Vec::new();
+            let target_val: ValidationTarget = target.into();
+
+            for dir in &dirs {
+                let mut diags = Vec::new();
+
+                // Run spec conformance checks unless --no-validate.
+                if !no_validate {
+                    diags.extend(aigent::validate_with_target(dir, target_val));
+
+                    // Apply fixes if requested.
+                    if apply_fixes {
+                        match aigent::apply_fixes(dir, &diags) {
+                            Ok(count) if count > 0 => {
+                                eprintln!("Applied {count} fix(es) to {}", dir.display());
+                                diags = aigent::validate_with_target(dir, target_val);
+                            }
+                            Ok(_) => {}
+                            Err(e) => {
+                                eprintln!(
+                                    "warning: could not apply fixes to {}: {e}",
+                                    dir.display()
+                                );
+                            }
+                        }
+                    }
                 }
-            };
+
+                // Always run semantic lint checks (the core of `check`).
+                match aigent::read_properties(dir) {
+                    Ok(props) => {
+                        let body = aigent::read_body(dir);
+                        diags.extend(aigent::lint(&props, &body));
+                    }
+                    Err(e) => {
+                        // Report parse failures as diagnostics rather than silently skipping.
+                        diags.push(Diagnostic::new(
+                            aigent::Severity::Error,
+                            "E000",
+                            format!("cannot read properties: {e}"),
+                        ));
+                    }
+                }
+
+                // Append structure checks if requested.
+                if structure {
+                    diags.extend(aigent::validate_structure(dir));
+                }
+
+                all_diags.push((dir.clone(), diags));
+            }
+
+            let has_errors = all_diags
+                .iter()
+                .any(|(_, d)| d.iter().any(|d| d.is_error()));
 
             match format {
                 Format::Text => {
-                    for d in &diags {
-                        eprintln!("{d}");
+                    let multi = all_diags.len() > 1;
+                    for (dir, diags) in &all_diags {
+                        if multi && !diags.is_empty() {
+                            eprintln!("{}:", dir.display());
+                        }
+                        for d in diags {
+                            if multi {
+                                eprintln!("  {d}");
+                            } else {
+                                eprintln!("{d}");
+                            }
+                        }
+                    }
+                    if multi {
+                        let total = all_diags.len();
+                        let errors = all_diags
+                            .iter()
+                            .filter(|(_, d)| d.iter().any(|d| d.is_error()))
+                            .count();
+                        let warnings = all_diags
+                            .iter()
+                            .filter(|(_, d)| {
+                                d.iter().any(|d| d.is_warning()) && !d.iter().any(|d| d.is_error())
+                            })
+                            .count();
+                        let ok = total - errors - warnings;
+                        eprintln!(
+                            "\n{total} skills: {ok} ok, {errors} errors, {warnings} warnings only"
+                        );
                     }
                 }
                 Format::Json => {
-                    let json = serde_json::to_string_pretty(&diags).unwrap();
+                    let entries: Vec<serde_json::Value> = all_diags
+                        .iter()
+                        .map(|(dir, diags)| {
+                            serde_json::json!({
+                                "path": dir.display().to_string(),
+                                "diagnostics": diags,
+                            })
+                        })
+                        .collect();
+                    let json = serde_json::to_string_pretty(&entries).unwrap();
                     println!("{json}");
                 }
             }
 
-            // Lint never causes failure — all diagnostics are Info.
+            if has_errors {
+                std::process::exit(1);
+            }
         }
         Some(Commands::ReadProperties { skill_dir }) => {
             let dir = resolve_skill_dir(&skill_dir);
@@ -412,7 +560,7 @@ fn main() {
                 }
             }
         }
-        Some(Commands::ToPrompt {
+        Some(Commands::Prompt {
             skill_dirs,
             format,
             budget,
@@ -484,7 +632,7 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Some(Commands::Build {
+        Some(Commands::New {
             purpose,
             name,
             dir,
@@ -506,6 +654,9 @@ fn main() {
             };
             match result {
                 Ok(result) => {
+                    for w in &result.warnings {
+                        eprintln!("warning: {w}");
+                    }
                     println!(
                         "Created skill '{}' at {}",
                         result.properties.name,
@@ -513,7 +664,7 @@ fn main() {
                     );
                 }
                 Err(e) => {
-                    eprintln!("aigent build: {e}");
+                    eprintln!("aigent new: {e}");
                     std::process::exit(1);
                 }
             }
@@ -568,7 +719,7 @@ fn main() {
                 println!("{content}");
             }
         }
-        Some(Commands::Test {
+        Some(Commands::Probe {
             skill_dir,
             query,
             format,
@@ -596,18 +747,135 @@ fn main() {
                     }
                 },
                 Err(e) => {
-                    eprintln!("aigent test: {e}");
+                    eprintln!("aigent probe: {e}");
                     std::process::exit(1);
                 }
+            }
+        }
+        Some(Commands::Build {
+            skill_dirs,
+            output,
+            name,
+            validate,
+        }) => {
+            let dirs: Vec<&std::path::Path> = skill_dirs.iter().map(|p| p.as_path()).collect();
+            let opts = aigent::AssembleOptions {
+                output_dir: output,
+                name,
+                validate,
+            };
+            match aigent::assemble_plugin(&dirs, &opts) {
+                Ok(result) => {
+                    for w in &result.warnings {
+                        eprintln!("warning: {}: {}", w.dir.display(), w.message);
+                    }
+                    println!(
+                        "Assembled {} skill(s) into {}",
+                        result.skills_count,
+                        result.plugin_dir.display()
+                    );
+                }
+                Err(e) => {
+                    eprintln!("aigent build: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some(Commands::Test {
+            skill_dirs,
+            format,
+            recursive,
+            generate,
+        }) => {
+            let dirs = resolve_dirs(&skill_dirs, recursive);
+            if dirs.is_empty() {
+                if recursive {
+                    eprintln!("No SKILL.md files found under the specified path(s).");
+                } else {
+                    eprintln!("Usage: aigent test <skill-dir> [<skill-dir>...]");
+                }
+                std::process::exit(1);
+            }
+
+            if generate {
+                let mut any_error = false;
+                for dir in &dirs {
+                    match aigent::generate_fixture(dir) {
+                        Ok(yaml) => {
+                            let fixture_path = dir.join("tests.yml");
+                            if fixture_path.exists() {
+                                eprintln!("Skipping {} — tests.yml already exists", dir.display());
+                            } else {
+                                std::fs::write(&fixture_path, &yaml).unwrap_or_else(|e| {
+                                    eprintln!(
+                                        "aigent test: failed to write {}: {e}",
+                                        fixture_path.display()
+                                    );
+                                    std::process::exit(1);
+                                });
+                                eprintln!("Generated {}", fixture_path.display());
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("aigent test: {}: {e}", dir.display());
+                            any_error = true;
+                        }
+                    }
+                }
+                if any_error {
+                    std::process::exit(1);
+                }
+                return;
+            }
+
+            let mut total_passed = 0;
+            let mut total_failed = 0;
+            let mut any_error = false;
+
+            for dir in &dirs {
+                match aigent::run_test_suite(dir) {
+                    Ok(result) => {
+                        match format {
+                            Format::Text => {
+                                if dirs.len() > 1 {
+                                    eprintln!("{}:", dir.display());
+                                }
+                                eprint!("{}", aigent::format_test_suite(&result));
+                            }
+                            Format::Json => {
+                                let json = serde_json::to_string_pretty(&result).unwrap();
+                                println!("{json}");
+                            }
+                        }
+                        total_passed += result.passed;
+                        total_failed += result.failed;
+                    }
+                    Err(e) => {
+                        eprintln!("aigent test: {}: {e}", dir.display());
+                        any_error = true;
+                    }
+                }
+            }
+
+            if dirs.len() > 1 {
+                eprintln!(
+                    "\nTotal: {total_passed} passed, {total_failed} failed, {} total",
+                    total_passed + total_failed
+                );
+            }
+
+            if total_failed > 0 || any_error {
+                std::process::exit(1);
             }
         }
         Some(Commands::Upgrade {
             skill_dir,
             apply,
+            full,
             format,
         }) => {
             let dir = resolve_skill_dir(&skill_dir);
-            match run_upgrade(&dir, apply) {
+            match run_upgrade(&dir, apply, full) {
                 Ok(suggestions) => {
                     if suggestions.is_empty() {
                         eprintln!("No upgrade suggestions — skill follows current best practices.");
@@ -641,6 +909,54 @@ fn main() {
                     eprintln!("aigent upgrade: {e}");
                     std::process::exit(1);
                 }
+            }
+        }
+        Some(Commands::Fmt {
+            skill_dirs,
+            check,
+            recursive,
+        }) => {
+            let dirs = resolve_dirs(&skill_dirs, recursive);
+            if dirs.is_empty() {
+                if recursive {
+                    eprintln!("No SKILL.md files found under the specified path(s).");
+                } else {
+                    eprintln!("Usage: aigent fmt <skill-dir> [<skill-dir>...]");
+                }
+                std::process::exit(1);
+            }
+
+            let mut any_changed = false;
+            let mut any_error = false;
+            for dir in &dirs {
+                match aigent::format_skill(dir) {
+                    Ok(result) => {
+                        if result.changed {
+                            any_changed = true;
+                            if check {
+                                eprintln!("Would reformat: {}", dir.display());
+                            } else {
+                                let path = aigent::find_skill_md(dir).unwrap();
+                                std::fs::write(&path, &result.content).unwrap_or_else(|e| {
+                                    eprintln!(
+                                        "aigent fmt: failed to write {}: {e}",
+                                        path.display()
+                                    );
+                                    std::process::exit(1);
+                                });
+                                eprintln!("Formatted {}", dir.display());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("aigent fmt: {}: {e}", dir.display());
+                        any_error = true;
+                    }
+                }
+            }
+
+            if any_error || (check && any_changed) {
+                std::process::exit(1);
             }
         }
         Some(Commands::Init { dir, template }) => {
@@ -718,7 +1034,6 @@ fn run_watch_mode(
     skill_dirs: &[PathBuf],
     _format: Format,
     target: Target,
-    lint: bool,
     structure: bool,
     recursive: bool,
     apply_fixes: bool,
@@ -736,7 +1051,7 @@ fn run_watch_mode(
     let target_val: aigent::diagnostics::ValidationTarget = target.into();
 
     // Run initial validation.
-    run_validation_pass(&dirs, target_val, lint, structure, apply_fixes);
+    run_validation_pass(&dirs, target_val, structure, apply_fixes);
 
     // Set up file watcher.
     let (tx, rx) = mpsc::channel();
@@ -783,7 +1098,7 @@ fn run_watch_mode(
 
                 // Re-resolve dirs in case new skills appeared.
                 let dirs = resolve_dirs(skill_dirs, recursive);
-                run_validation_pass(&dirs, target_val, lint, structure, apply_fixes);
+                run_validation_pass(&dirs, target_val, structure, apply_fixes);
 
                 last_run = Instant::now();
 
@@ -803,7 +1118,6 @@ fn run_watch_mode(
 fn run_validation_pass(
     dirs: &[PathBuf],
     target: aigent::diagnostics::ValidationTarget,
-    lint: bool,
     structure: bool,
     apply_fixes: bool,
 ) {
@@ -819,13 +1133,6 @@ fn run_validation_pass(
                     eprintln!("Applied {count} fix(es) to {}", dir.display());
                     diags = aigent::validate_with_target(dir, target);
                 }
-            }
-        }
-
-        if lint {
-            if let Ok(props) = aigent::read_properties(dir) {
-                let body = read_body(dir);
-                diags.extend(aigent::lint(&props, &body));
             }
         }
 
@@ -895,22 +1202,71 @@ fn format_doc_catalog(entries: &[aigent::SkillEntry]) -> String {
     out
 }
 
-/// Read the SKILL.md body (post-frontmatter) for linting.
+/// Extract frontmatter lines from SKILL.md content (between the `---` delimiters).
 ///
-/// Returns an empty string if the file can't be read or parsed.
-fn read_body(dir: &std::path::Path) -> String {
-    let path = aigent::find_skill_md(dir);
-    let path = match path {
-        Some(p) => p,
-        None => return String::new(),
-    };
-    let content = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return String::new(),
-    };
-    match aigent::parse_frontmatter(&content) {
-        Ok((_, body)) => body,
-        Err(_) => String::new(),
+/// Returns the lines without the delimiters.
+fn extract_frontmatter_lines(content: &str) -> Vec<String> {
+    content
+        .lines()
+        .skip(1) // skip opening ---
+        .take_while(|l| l.trim_end() != "---")
+        .map(|l| l.to_string())
+        .collect()
+}
+
+/// Detect the indentation style used in frontmatter lines.
+///
+/// Scans for the first indented line and returns its leading spaces.
+/// Defaults to "  " (2 spaces) if no indented lines are found.
+/// Note: YAML forbids tabs for indentation, so only spaces are considered.
+fn detect_indent(lines: &[String]) -> String {
+    for line in lines {
+        if line.starts_with(' ') {
+            let indent: String = line.chars().take_while(|c| *c == ' ').collect();
+            return indent;
+        }
+    }
+    "  ".to_string() // default: 2 spaces
+}
+
+/// Find the insertion position for new metadata keys.
+///
+/// Locates the `metadata:` line (not in a comment) and returns the index
+/// after the last indented child key beneath it.
+fn find_metadata_insert_position(lines: &[String]) -> usize {
+    let mut meta_line_idx = None;
+
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        // Skip comment lines.
+        if trimmed.starts_with('#') {
+            continue;
+        }
+        // Match `metadata:` as a top-level key (not indented).
+        if trimmed.starts_with("metadata:") && !line.starts_with(' ') {
+            meta_line_idx = Some(i);
+            break;
+        }
+    }
+
+    if let Some(idx) = meta_line_idx {
+        // Walk forward from metadata: to find the last indented child line.
+        let mut last_child = idx;
+        for (i, line) in lines.iter().enumerate().skip(idx + 1) {
+            if line.is_empty() || line.starts_with(' ') {
+                // Still inside the metadata block (indented or blank).
+                if !line.trim().is_empty() {
+                    last_child = i;
+                }
+            } else {
+                // Hit a non-indented line — end of metadata block.
+                break;
+            }
+        }
+        last_child + 1
+    } else {
+        // Fallback: insert at the end.
+        lines.len()
     }
 }
 
@@ -918,12 +1274,58 @@ fn read_body(dir: &std::path::Path) -> String {
 ///
 /// Checks for missing best-practice fields and returns a list of human-readable
 /// suggestions. With `apply = true`, attempts to add missing optional fields.
+/// With `full = true`, also runs validate + lint first (and applies fixes if
+/// `apply` is also true).
 fn run_upgrade(
     dir: &std::path::Path,
     apply: bool,
+    full: bool,
 ) -> std::result::Result<Vec<String>, aigent::AigentError> {
-    let props = aigent::read_properties(dir)?;
     let mut suggestions = Vec::new();
+
+    // Full mode: run validate + lint before upgrade analysis.
+    if full {
+        let mut diags = aigent::validate(dir);
+        if let Ok(props) = aigent::read_properties(dir) {
+            let body = aigent::read_body(dir);
+            diags.extend(aigent::lint(&props, &body));
+        }
+
+        if apply {
+            let fixable: Vec<_> = diags
+                .iter()
+                .filter(|d| d.suggestion.is_some())
+                .cloned()
+                .collect();
+            if !fixable.is_empty() {
+                let fix_count = aigent::apply_fixes(dir, &fixable)?;
+                if fix_count > 0 {
+                    suggestions.push(format!(
+                        "[full] Applied {fix_count} validation/lint fix(es)"
+                    ));
+                }
+                // Re-run diagnostics after fixes to get fresh state.
+                diags = aigent::validate(dir);
+                if let Ok(props) = aigent::read_properties(dir) {
+                    let body = aigent::read_body(dir);
+                    diags.extend(aigent::lint(&props, &body));
+                }
+            }
+        }
+
+        let errors: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
+        let warnings: Vec<_> = diags.iter().filter(|d| d.is_warning()).collect();
+        if !errors.is_empty() || !warnings.is_empty() {
+            for d in &errors {
+                suggestions.push(format!("[full] error: {d}"));
+            }
+            for d in &warnings {
+                suggestions.push(format!("[full] warning: {d}"));
+            }
+        }
+    }
+
+    let props = aigent::read_properties(dir)?;
 
     // Check for missing compatibility field.
     if props.compatibility.is_none() {
@@ -977,7 +1379,7 @@ fn run_upgrade(
     }
 
     // Check body length.
-    let body = read_body(dir);
+    let body = aigent::read_body(dir);
     let line_count = body.lines().count();
     if line_count > 500 {
         suggestions.push(format!(
@@ -990,59 +1392,49 @@ fn run_upgrade(
         if let Some(path) = aigent::find_skill_md(dir) {
             if let Ok(content) = std::fs::read_to_string(&path) {
                 if let Ok((raw_map, body)) = aigent::parse_frontmatter(&content) {
-                    let mut updated_yaml = String::new();
-                    // Re-serialize frontmatter with additions.
-                    // We simply append missing fields to existing frontmatter.
-                    let existing_front = content
-                        .lines()
-                        .skip(1) // skip opening ---
-                        .take_while(|l| *l != "---")
-                        .collect::<Vec<_>>()
-                        .join("\n");
+                    let front_lines = extract_frontmatter_lines(&content);
+                    let mut updated_lines = front_lines.clone();
 
-                    updated_yaml.push_str(&existing_front);
-
+                    // Append compatibility if missing.
                     if props.compatibility.is_none() && !raw_map.contains_key("compatibility") {
-                        updated_yaml.push_str("\ncompatibility: claude-code");
+                        updated_lines.push("compatibility: claude-code".to_string());
                     }
 
+                    // Insert metadata keys.
                     if !has_version || !has_author {
                         if meta_block.is_none() {
-                            // No metadata block at all — add the entire block.
-                            updated_yaml.push_str("\nmetadata:");
+                            // No metadata block — append entire block.
+                            updated_lines.push("metadata:".to_string());
+                            let indent = detect_indent(&front_lines);
                             if !has_version {
-                                updated_yaml.push_str("\n  version: '0.1.0'");
+                                updated_lines.push(format!("{indent}version: '0.1.0'"));
                             }
                             if !has_author {
-                                updated_yaml.push_str("\n  author: unknown");
+                                updated_lines.push(format!("{indent}author: unknown"));
                             }
                         } else {
-                            // Partial metadata exists — append missing keys under it.
-                            // Find the metadata: line and insert after it.
-                            let lines: Vec<&str> = updated_yaml.lines().collect();
-                            let mut new_yaml = String::new();
-                            for line in &lines {
-                                new_yaml.push_str(line);
-                                new_yaml.push('\n');
-                                if line.trim_start().starts_with("metadata:") {
-                                    if !has_version {
-                                        new_yaml.push_str("  version: '0.1.0'\n");
-                                    }
-                                    if !has_author {
-                                        new_yaml.push_str("  author: unknown\n");
-                                    }
-                                }
+                            // Partial metadata — find the metadata: line and insert after
+                            // the last existing child key under it.
+                            let indent = detect_indent(&front_lines);
+                            let insert_pos = find_metadata_insert_position(&updated_lines);
+                            let mut to_insert = Vec::new();
+                            if !has_version {
+                                to_insert.push(format!("{indent}version: '0.1.0'"));
                             }
-                            // Remove trailing newline to match expected format.
-                            updated_yaml = new_yaml.trim_end_matches('\n').to_string();
+                            if !has_author {
+                                to_insert.push(format!("{indent}author: unknown"));
+                            }
+                            // Insert after the last metadata child, in reverse to maintain order.
+                            for (i, line) in to_insert.into_iter().enumerate() {
+                                updated_lines.insert(insert_pos + i, line);
+                            }
                         }
                     }
 
+                    let updated_yaml = updated_lines.join("\n");
                     let new_content = format!("---\n{updated_yaml}\n---\n{body}");
                     if new_content != content {
-                        std::fs::write(&path, new_content).unwrap_or_else(|e| {
-                            eprintln!("aigent upgrade: failed to write {}: {e}", path.display());
-                        });
+                        std::fs::write(&path, &new_content)?;
                         eprintln!("Applied upgrades to {}", path.display());
                     }
                 }

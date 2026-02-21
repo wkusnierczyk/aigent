@@ -18,7 +18,7 @@
 - [Library Usage](#library-usage)
 - [SKILL.md Format](#skillmd-format)
 - [Builder Modes](#builder-modes)
-- [Specification Compliance](#specification-compliance)
+- [Compliance](#compliance)
 - [CLI Reference](#cli-reference)
 - [API Reference](#api-reference)
 - [Claude Code Plugin](#claude-code-plugin)
@@ -66,20 +66,32 @@ curl -fsSL https://raw.githubusercontent.com/wkusnierczyk/aigent/main/install.sh
 # Initialize a new skill
 aigent init my-skill/
 
-# Build a skill from a description
-aigent build "Process PDF files and extract text" --no-llm
+# Create a skill from a description
+aigent new "Process PDF files and extract text" --no-llm
 
-# Validate a skill directory
-aigent validate my-skill/ --lint --structure
+# Validate a skill directory (spec conformance)
+aigent validate my-skill/ --structure
+
+# Run validate + semantic quality checks
+aigent check my-skill/
 
 # Score a skill against best practices (0–100)
 aigent score my-skill/
 
-# Test skill activation against a query
-aigent test my-skill/ "process PDF files"
+# Format a SKILL.md (canonical key order, clean whitespace)
+aigent fmt my-skill/
+
+# Probe skill activation against a query
+aigent probe my-skill/ "process PDF files"
+
+# Run fixture-based test suite
+aigent test my-skill/
 
 # Check for upgrade opportunities
 aigent upgrade my-skill/
+
+# Assemble skills into a Claude Code plugin
+aigent build my-skill/ other-skill/ --output ./dist
 
 # Generate a skill catalog
 aigent doc skills/ --recursive
@@ -88,7 +100,7 @@ aigent doc skills/ --recursive
 aigent read-properties my-skill/
 
 # Generate XML prompt for LLM injection
-aigent to-prompt my-skill/ other-skill/
+aigent prompt my-skill/ other-skill/
 ```
 
 To enable LLM-enhanced generation, set an API key in your environment
@@ -109,6 +121,19 @@ let props = aigent::read_properties(Path::new("my-skill")).unwrap();
 
 // Generate prompt XML
 let xml = aigent::to_prompt(&[Path::new("skill-a"), Path::new("skill-b")]);
+
+// Format a SKILL.md
+let result = aigent::format_skill(Path::new("my-skill")).unwrap();
+
+// Assemble skills into a plugin
+let opts = aigent::AssembleOptions {
+    output_dir: std::path::PathBuf::from("./dist"),
+    name: None,
+    validate: true,
+};
+let result = aigent::assemble_plugin(
+    &[Path::new("skill-a"), Path::new("skill-b")], &opts,
+).unwrap();
 
 // Build a skill
 let spec = aigent::SkillSpec {
@@ -207,7 +232,9 @@ OpenAI-compatible endpoints (vLLM, LM Studio, etc.) are supported via
 
 Use `--no-llm` to force deterministic mode regardless of available providers.
 
-## Specification Compliance
+## Compliance
+
+### Specification Coverage
 
 Three-way comparison of the
 [Anthropic agent skill specification](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices),
@@ -239,6 +266,29 @@ aigent implements **all** rules from the specification, plus additional checks
 (Unicode NFKC normalization, path canonicalization, post-build validation) that
 go beyond both the specification and the reference implementation.
 
+### aigent vs. plugin-dev
+
+Anthropic's **plugin-dev** plugin (bundled with Claude Code) and **aigent**
+are complementary tools for skill development:
+
+| | **aigent** | **plugin-dev** |
+|---|---|---|
+| **What** | Rust CLI + library | Claude Code plugin (LLM-guided) |
+| **Scope** | Deep: SKILL.md toolchain | Broad: entire plugin ecosystem |
+| **Validation** | Deterministic — typed diagnostics, error codes, JSON output | Heuristic — agent-based review |
+| **Scoring** | Weighted 0–100 with CI gating | Not available |
+| **Formatting** | `aigent fmt` — idempotent, `--check` for CI | Not available |
+| **Testing** | Fixture-based (`tests.yml`) + single-query probe | General guidance only |
+| **Assembly** | `aigent build` — reproducible, scriptable | `/create-plugin` — guided, interactive |
+| **Ecosystem** | Skills only | Skills + commands + agents + hooks + MCP + settings |
+
+aigent handles the **depth** of SKILL.md quality enforcement (validation,
+scoring, formatting, testing, assembly). plugin-dev covers the **breadth**
+of the Claude Code plugin ecosystem (7 component types, ~21,000 words of
+guidance). Use plugin-dev to learn patterns; use aigent to enforce them.
+
+For the full analysis, see [dev/plugin-dev.md](dev/plugin-dev.md).
+
 ### Extras
 
 Features in aigent that go beyond the specification and reference implementation:
@@ -246,12 +296,16 @@ Features in aigent that go beyond the specification and reference implementation
 | Feature | Description |
 |---------|-------------|
 | Semantic linting | Quality checks: third-person descriptions, trigger phrases, gerund names, generic names |
-| Quality scoring | Weighted 0–100 score combining structural validation and semantic lint |
+| Quality scoring | Weighted 0–100 score with distinct pass/fail labels per check |
 | Auto-fix | Automatic correction of fixable issues (e.g., name casing) |
 | Skill builder | Generate skills from natural language (deterministic + multi-provider LLM) |
 | Interactive build | Step-by-step confirmation mode for skill generation |
-| Skill tester | Simulate skill activation against sample user queries |
-| Skill upgrade | Detect and apply best-practice upgrades (compatibility, metadata, trigger phrases) |
+| Skill tester (probe) | Simulate skill activation with weighted scoring formula (0.5×description + 0.3×trigger + 0.2×name) |
+| Fixture-based testing | Run test suites from `tests.yml` with expected match/no-match and minimum score thresholds |
+| SKILL.md formatter | Canonical YAML key ordering, consistent whitespace, idempotent formatting |
+| Skill-to-plugin assembly | Package skill directories into a Claude Code plugin with `plugin.json` manifest |
+| Skill upgrade | Detect and apply best-practice upgrades with `--full` mode (validate + lint + fix + upgrade) |
+| Unified check command | `check` = validate + semantic lint; `--no-validate` for lint-only |
 | Directory structure validation | Check for missing references, script permissions, nesting depth |
 | Cross-skill conflict detection | Name collisions, description similarity, token budget analysis |
 | Documentation generation | Markdown skill catalog with diff-aware output |
@@ -269,61 +323,119 @@ documentation is available at [docs.rs/aigent](https://docs.rs/aigent).
 
 ### Commands
 
+**Quality spectrum:** `validate` (spec conformance) → `check` (+ semantic quality) → `score` (quantitative 0–100).
+
 <table>
 <tr><th width="280">Command</th><th>Description</th></tr>
-<tr><td><code>validate &lt;dirs...&gt;</code></td><td>Validate skill directories; exit 0 if valid</td></tr>
-<tr><td><code>lint &lt;directory&gt;</code></td><td>Run semantic lint checks on a skill</td></tr>
+<tr><td><code>validate &lt;dirs...&gt;</code></td><td>Validate skill directories against the spec; exit 0 if valid</td></tr>
+<tr><td><code>check &lt;dirs...&gt;</code></td><td>Run validate + semantic lint checks (superset of <code>validate</code>)</td></tr>
 <tr><td><code>score &lt;directory&gt;</code></td><td>Score a skill against best-practices checklist (0–100)</td></tr>
-<tr><td><code>test &lt;directory&gt; &lt;query&gt;</code></td><td>Test skill activation against a sample user query</td></tr>
+<tr><td><code>fmt &lt;dirs...&gt;</code></td><td>Format SKILL.md files (canonical key order, clean whitespace)</td></tr>
+<tr><td><code>probe &lt;directory&gt; &lt;query&gt;</code></td><td>Probe skill activation against a sample user query</td></tr>
+<tr><td><code>test &lt;dirs...&gt;</code></td><td>Run fixture-based test suites from <code>tests.yml</code></td></tr>
 <tr><td><code>upgrade &lt;directory&gt;</code></td><td>Check a skill for upgrade opportunities</td></tr>
+<tr><td><code>build &lt;dirs...&gt;</code></td><td>Assemble skills into a Claude Code plugin</td></tr>
+<tr><td><code>new &lt;purpose&gt;</code></td><td>Create a skill from natural language</td></tr>
+<tr><td><code>init [directory]</code></td><td>Create a template SKILL.md</td></tr>
 <tr><td><code>doc &lt;dirs...&gt;</code></td><td>Generate a markdown skill catalog</td></tr>
 <tr><td><code>read-properties &lt;directory&gt;</code></td><td>Output skill properties as JSON</td></tr>
-<tr><td><code>to-prompt &lt;dirs...&gt;</code></td><td>Generate <code>&lt;available_skills&gt;</code> XML block</td></tr>
-<tr><td><code>build &lt;purpose&gt;</code></td><td>Build a skill from natural language</td></tr>
-<tr><td><code>init [directory]</code></td><td>Create a template SKILL.md</td></tr>
+<tr><td><code>prompt &lt;dirs...&gt;</code></td><td>Generate <code>&lt;available_skills&gt;</code> XML block</td></tr>
 </table>
+
+> **Backward compatibility:** The old command names `lint`, `to-prompt`, and `create` are
+> available as hidden aliases and continue to work. The old `test <dir> <query>` single-query
+> syntax has been renamed to `probe`; `test` now runs fixture-based test suites.
 
 ### Validate Flags
 
 <table>
 <tr><th width="280">Flag</th><th>Description</th></tr>
-<tr><td><code>--lint</code></td><td>Run semantic lint checks</td></tr>
 <tr><td><code>--structure</code></td><td>Run directory structure checks</td></tr>
 <tr><td><code>--recursive</code></td><td>Discover skills recursively</td></tr>
 <tr><td><code>--apply-fixes</code></td><td>Apply automatic fixes for fixable issues</td></tr>
 <tr><td><code>--watch</code></td><td>Watch for changes and re-validate (see <a href="#watch-mode">Watch mode</a>)</td></tr>
-<tr><td><code>--target &lt;TARGET&gt;</code></td><td>Validation target: <code>standard</code> or <code>claude-code</code></td></tr>
+<tr><td><code>--target &lt;TARGET&gt;</code></td><td>Validation target: <code>standard</code>, <code>claude-code</code>, or <code>permissive</code></td></tr>
 <tr><td><code>--format &lt;FORMAT&gt;</code></td><td>Output format: <code>text</code> or <code>json</code></td></tr>
 </table>
 
-### Build Flags
+> **Note:** Semantic lint checks have moved to `check`. Use `aigent check` for
+> combined validation + linting, or `aigent check --no-validate` for lint-only.
+
+### Check Flags
+
+<table>
+<tr><th width="280">Flag</th><th>Description</th></tr>
+<tr><td><code>--no-validate</code></td><td>Skip spec conformance checks (semantic quality only)</td></tr>
+<tr><td><code>--structure</code></td><td>Run directory structure checks</td></tr>
+<tr><td><code>--recursive</code></td><td>Discover skills recursively</td></tr>
+<tr><td><code>--apply-fixes</code></td><td>Apply automatic fixes for fixable issues</td></tr>
+<tr><td><code>--target &lt;TARGET&gt;</code></td><td>Validation target: <code>standard</code>, <code>claude-code</code>, or <code>permissive</code></td></tr>
+<tr><td><code>--format &lt;FORMAT&gt;</code></td><td>Output format: <code>text</code> or <code>json</code></td></tr>
+</table>
+
+### New Flags
 
 <table>
 <tr><th width="280">Flag</th><th>Description</th></tr>
 <tr><td><code>--name &lt;NAME&gt;</code></td><td>Override the derived skill name</td></tr>
 <tr><td><code>--dir &lt;DIRECTORY&gt;</code></td><td>Output directory</td></tr>
 <tr><td><code>--no-llm</code></td><td>Force deterministic mode (no LLM)</td></tr>
-<tr><td><code>--interactive</code></td><td>Step-by-step confirmation mode</td></tr>
+<tr><td><code>--interactive, -i</code></td><td>Step-by-step confirmation mode</td></tr>
+</table>
+
+### Fmt Flags
+
+<table>
+<tr><th width="280">Flag</th><th>Description</th></tr>
+<tr><td><code>--check</code></td><td>Check formatting without modifying files (exit 1 if unformatted)</td></tr>
+<tr><td><code>--recursive</code></td><td>Discover skills recursively</td></tr>
+</table>
+
+### Build (Assembly) Flags
+
+<table>
+<tr><th width="280">Flag</th><th>Description</th></tr>
+<tr><td><code>--output &lt;DIR&gt;</code></td><td>Output directory for the assembled plugin (default: <code>./dist</code>)</td></tr>
+<tr><td><code>--name &lt;NAME&gt;</code></td><td>Override the plugin name (default: first skill name)</td></tr>
+<tr><td><code>--validate</code></td><td>Run validation on assembled skills</td></tr>
+</table>
+
+### Test Flags
+
+<table>
+<tr><th width="280">Flag</th><th>Description</th></tr>
+<tr><td><code>--generate</code></td><td>Generate a starter <code>tests.yml</code> for skills that lack one</td></tr>
+<tr><td><code>--recursive</code></td><td>Discover skills recursively</td></tr>
+<tr><td><code>--format &lt;FORMAT&gt;</code></td><td>Output format: <code>text</code> or <code>json</code></td></tr>
+</table>
+
+### Upgrade Flags
+
+<table>
+<tr><th width="280">Flag</th><th>Description</th></tr>
+<tr><td><code>--apply</code></td><td>Apply automatic upgrades</td></tr>
+<tr><td><code>--full</code></td><td>Run validate + lint before upgrade (with <code>--apply</code>, also fix errors first)</td></tr>
+<tr><td><code>--format &lt;FORMAT&gt;</code></td><td>Output format: <code>text</code> or <code>json</code></td></tr>
 </table>
 
 ### Command Examples
 
-#### `validate` — Check skill directories for errors
+#### `validate` — Check skill directories for spec conformance
 
 Validates one or more skill directories against the Anthropic specification.
-Exit code 0 means valid; non-zero means errors or warnings were found.
+Exit code 0 means valid; non-zero means errors or warnings were found. For
+combined validation + semantic quality checks, use `check` instead.
 
 ```
 $ aigent validate my-skill/
 (no output — skill is valid)
 ```
 
-With `--lint` and `--structure` for additional checks:
+With `--structure` for directory layout checks:
 
 ```
-$ aigent validate skills/aigent-validator --lint --structure
+$ aigent validate skills/aigent-validator --structure
 warning: unexpected metadata field: 'argument-hint'
-info: name does not use gerund form
 ```
 
 Multiple directories trigger cross-skill conflict detection automatically:
@@ -360,14 +472,23 @@ $ aigent validate skills/aigent-validator --format json
 ]
 ```
 
-#### `lint` — Semantic quality checks
+#### `check` — Validate + semantic quality checks
 
-Runs quality-focused checks beyond structural validation: third-person
-descriptions, trigger phrases, gerund name forms, generic names, and
-description detail.
+Runs spec conformance (like `validate`) plus semantic quality checks:
+third-person descriptions, trigger phrases, gerund name forms, generic
+names, and description detail. Use `--no-validate` to skip spec checks
+and run semantic lint only.
 
 ```
-$ aigent lint skills/aigent-validator
+$ aigent check skills/aigent-validator
+warning: unexpected metadata field: 'argument-hint'
+info: name does not use gerund form
+```
+
+Semantic lint only (equivalent to the old `lint` command):
+
+```
+$ aigent check --no-validate skills/aigent-validator
 info: name does not use gerund form
 ```
 
@@ -411,8 +532,9 @@ Quality (40/40):
   [PASS] Detailed description
 ```
 
-**Example** — a skill with issues (unknown field zeroes structural, non-gerund
-name costs 8 quality points):
+**Example** — a skill with issues. Each check shows a distinct label for its
+pass/fail state (e.g., "No unknown fields" when passing, "Unknown fields
+found" when failing):
 
 ```
 $ aigent score aigent-validator/
@@ -423,40 +545,45 @@ Structural (0/60):
   [PASS] Name format valid
   [PASS] Description valid
   [PASS] Required fields present
-  [FAIL] No unknown fields
+  [FAIL] Unknown fields found
          unexpected metadata field: 'argument-hint'
   [PASS] Body within size limits
 
 Quality (32/40):
   [PASS] Third-person description
   [PASS] Trigger phrase present
-  [FAIL] Gerund name form
+  [FAIL] Non-gerund name form
          name does not use gerund form
   [PASS] Specific name
   [PASS] Detailed description
 ```
 
-#### `test` — Simulate skill activation
+#### `probe` — Simulate skill activation
 
-Tests whether a skill's description would activate for a given user query.
+Probes whether a skill's description would activate for a given user query.
 This is a dry-run of skill discovery — "if a user said *this*, would Claude
 pick up *that* skill?"
 
-Tokenizes the query and description, measures word overlap, and reports:
-- **Strong** (≥50% overlap) — skill would reliably activate
-- **Weak** (≥20%) — might activate, but description could be improved
-- **None** (<20%) — skill would not activate for this query
+Uses a **weighted formula** to compute a match score (0.0–1.0):
+- **0.5 × description overlap** — fraction of query tokens in description
+- **0.3 × trigger score** — match against trigger phrases ("Use when...")
+- **0.2 × name score** — query-to-name token overlap
+
+Categories based on weighted score:
+- **Strong** (≥ 0.4) — skill would reliably activate
+- **Weak** (≥ 0.15) — might activate, but description could be improved
+- **None** (< 0.15) — skill would not activate for this query
 
 Also reports estimated token cost and any validation issues.
 
 ```
-$ aigent test skills/aigent-validator "validate a skill"
+$ aigent probe skills/aigent-validator "validate a skill"
 Skill: aigent-validator
 Query: "validate a skill"
 Description: Validates AI agent skill definitions (SKILL.md files) against
 the Anthropic agent skill specification. ...
 
-Activation: STRONG ✓ — description aligns well with query
+Activation: STRONG ✓ — description aligns well with query (score: 0.65)
 Token footprint: ~76 tokens
 
 Validation warnings (1):
@@ -464,16 +591,17 @@ Validation warnings (1):
 ```
 
 ```
-$ aigent test skills/aigent-validator "deploy kubernetes"
+$ aigent probe skills/aigent-validator "deploy kubernetes"
 ...
-Activation: NONE ✗ — description does not match the test query
+Activation: NONE ✗ — description does not match the test query (score: 0.00)
 Token footprint: ~76 tokens
 ```
 
 #### `upgrade` — Detect and apply best-practice improvements
 
 Checks for recommended-but-optional fields and patterns. Use `--apply` to
-write missing fields into the SKILL.md.
+write missing fields into the SKILL.md. The `--full` flag first runs
+validate + lint and optionally fixes errors before analysing upgrades.
 
 ```
 $ aigent upgrade skills/aigent-validator
@@ -487,6 +615,15 @@ Run with --apply to apply 3 suggestion(s).
 ```
 $ aigent upgrade --apply skills/aigent-validator
 (applies missing fields in-place, prints confirmation to stderr)
+```
+
+Full mode runs validate + lint first, and with `--apply` fixes errors
+before performing upgrades:
+
+```
+$ aigent upgrade --full --apply skills/aigent-validator
+[full] Applied 1 validation/lint fix(es)
+Missing 'compatibility' field — recommended for multi-platform skills.
 ```
 
 #### `doc` — Generate a skill catalog
@@ -543,13 +680,13 @@ $ aigent read-properties skills/aigent-validator
 }
 ```
 
-#### `to-prompt` — Generate XML prompt block
+#### `prompt` — Generate XML prompt block
 
 Generates the `<available_skills>` XML block that gets injected into Claude's
 system prompt. Accepts multiple skill directories.
 
 ```
-$ aigent to-prompt skills/aigent-validator
+$ aigent prompt skills/aigent-validator
 <available_skills>
   <skill>
     <name>aigent-validator</name>
@@ -559,13 +696,13 @@ $ aigent to-prompt skills/aigent-validator
 </available_skills>
 ```
 
-#### `build` — Generate a skill from natural language
+#### `new` — Create a skill from natural language
 
 Creates a complete skill directory with SKILL.md from a purpose description.
 Uses LLM when an API key is available, or `--no-llm` for deterministic mode.
 
 ```
-$ aigent build "Extract text from PDF files" --no-llm
+$ aigent new "Extract text from PDF files" --no-llm
 Created skill 'extracting-text-pdf-files' at extracting-text-pdf-files
 ```
 
@@ -583,6 +720,72 @@ Extract text from PDF files
 
 ## Usage
 Use this skill to Extract text from PDF files.
+```
+
+#### `fmt` — Format SKILL.md files
+
+Normalizes SKILL.md files with canonical YAML key ordering, consistent
+whitespace, and clean formatting. The operation is idempotent — running
+it twice produces no further changes.
+
+```
+$ aigent fmt my-skill/
+Formatted my-skill/
+```
+
+Check mode reports which files would change without modifying them:
+
+```
+$ aigent fmt --check my-skill/
+Would reformat: my-skill/
+```
+
+#### `build` — Assemble skills into a plugin
+
+Packages one or more skill directories into a Claude Code plugin directory
+with a `plugin.json` manifest, `skills/` subdirectory, and scaffolded
+`agents/` and `hooks/` directories.
+
+```
+$ aigent build skills/aigent-validator skills/aigent-scorer --output ./dist
+Assembled 2 skill(s) into ./dist
+```
+
+The output structure:
+
+```
+dist/
+├── plugin.json
+├── skills/
+│   ├── aigent-validator/
+│   │   └── SKILL.md
+│   └── aigent-scorer/
+│       └── SKILL.md
+├── agents/
+└── hooks/
+```
+
+#### `test` — Run fixture-based test suites
+
+Runs test suites defined in `tests.yml` files alongside skills. Each test
+case specifies an input query, whether it should match, and an optional
+minimum score threshold.
+
+Generate a starter `tests.yml`:
+
+```
+$ aigent test --generate my-skill/
+Generated my-skill/tests.yml
+```
+
+Run the test suite:
+
+```
+$ aigent test my-skill/
+[PASS] "process pdf files" (score: 0.65)
+[PASS] "something completely unrelated to this skill" (score: 0.00)
+
+2 passed, 0 failed, 2 total
 ```
 
 #### `init` — Create a template SKILL.md
@@ -670,7 +873,11 @@ Full Rust API documentation with examples is published at
 | `ClarityAssessment` | `builder` | Purpose clarity evaluation result (clear flag, follow-up questions) |
 | `Diagnostic` | `diagnostics` | Structured diagnostic with severity, code, message, field, suggestion |
 | `ScoreResult` | `scorer` | Quality score result with structural and semantic categories |
-| `TestResult` | `tester` | Skill activation test result (query match, diagnostics, token cost) |
+| `TestResult` | `tester` | Skill activation probe result (query match, score, diagnostics, token cost) |
+| `TestSuiteResult` | `test_runner` | Fixture-based test suite result (passed, failed, per-case results) |
+| `FormatResult` | `formatter` | SKILL.md formatting result (changed flag, formatted content) |
+| `AssembleOptions` | `assembler` | Options for skill-to-plugin assembly (output dir, name, validate) |
+| `AssembleResult` | `assembler` | Assembly output (plugin directory, skill count) |
 | `SkillEntry` | `prompt` | Collected skill entry for prompt generation (name, description, location) |
 | `AigentError` | `errors` | Error enum: `Parse`, `Validation`, `Build`, `Io`, `Yaml` |
 | `Result<T>` | `errors` | Convenience alias for `std::result::Result<T, AigentError>` |
@@ -688,7 +895,12 @@ Full Rust API documentation with examples is published at
 | `to_prompt_format(&[&Path], PromptFormat) -> String` | `prompt` | Generate prompt in specified format |
 | `lint(&SkillProperties, &str) -> Vec<Diagnostic>` | `linter` | Run semantic quality checks |
 | `score(&Path) -> ScoreResult` | `scorer` | Score skill against best-practices checklist |
-| `test_skill(&Path, &str) -> Result<TestResult>` | `tester` | Test skill activation against a query |
+| `test_skill(&Path, &str) -> Result<TestResult>` | `tester` | Probe skill activation against a query |
+| `format_skill(&Path) -> Result<FormatResult>` | `formatter` | Format SKILL.md with canonical key order |
+| `format_content(&str) -> Result<String>` | `formatter` | Format SKILL.md content string |
+| `assemble_plugin(&[&Path], &AssembleOptions) -> Result<AssembleResult>` | `assembler` | Assemble skills into a plugin |
+| `run_test_suite(&Path) -> Result<TestSuiteResult>` | `test_runner` | Run fixture-based test suite |
+| `generate_fixture(&Path) -> Result<String>` | `test_runner` | Generate starter `tests.yml` from skill metadata |
 | `validate_structure(&Path) -> Vec<Diagnostic>` | `structure` | Validate directory structure |
 | `detect_conflicts(&[SkillEntry]) -> Vec<Diagnostic>` | `conflict` | Detect cross-skill conflicts |
 | `apply_fixes(&Path, &[Diagnostic]) -> Result<usize>` | `fixer` | Apply automatic fixes |
@@ -784,10 +996,13 @@ src/
 ├── fixer.rs                        # Auto-fix for fixable diagnostics
 ├── diagnostics.rs                  # Structured diagnostics with error codes
 ├── prompt.rs                       # Multi-format prompt generation
-├── scorer.rs                       # Quality scoring (0–100)
+├── scorer.rs                       # Quality scoring with pass/fail labels (0–100)
 ├── structure.rs                    # Directory structure validation
 ├── conflict.rs                     # Cross-skill conflict detection
-├── tester.rs                       # Skill activation tester/previewer
+├── tester.rs                       # Skill activation probe with weighted scoring
+├── formatter.rs                    # SKILL.md formatting (canonical key order, whitespace)
+├── assembler.rs                    # Skill-to-plugin assembly
+├── test_runner.rs                  # Fixture-based testing (tests.yml)
 ├── main.rs                         # CLI entry point (clap)
 └── builder/
     ├── mod.rs                      # Build pipeline orchestration
@@ -810,6 +1025,8 @@ time via `env!("CARGO_PKG_VERSION")`.
 
 ### Milestones
 
+**Status:** Implementation complete (M1–M13). In review.
+
 Project tracked at
 [github.com/users/wkusnierczyk/projects/39](https://github.com/users/wkusnierczyk/projects/39).
 
@@ -824,9 +1041,33 @@ Project tracked at
 | M7 | Builder | ✅ |
 | M8 | Main Module and Documentation | ✅ |
 | M9 | Claude Code Plugin | ✅ |
-| M10 | Improvements and Extensions | 🔧 |
-| M11 | Builder and Prompt Enhancements | 🔧 |
-| M12 | Ecosystem and Workflow | 🔧 |
+| M10 | Improvements and Extensions | ✅ |
+| M11 | Builder and Prompt Enhancements | ✅ |
+| M12 | Ecosystem and Workflow | ✅ |
+| M13 | Enhancements | ✅ |
+| M14 | SRE Review | 🔲 |
+| M15 | Plugin Ecosystem Validation | 🔲 |
+
+### Roadmap
+
+**M14: SRE Review** — security, reliability, and performance hardening prior
+to publication. Addresses symlink following, path traversal, uncapped file
+reads, silent error swallowing, TOCTOU races, and O(n²) conflict detection.
+10 issues ([#87](https://github.com/wkusnierczyk/aigent/issues/87)–[#96](https://github.com/wkusnierczyk/aigent/issues/96)).
+
+**M15: Plugin Ecosystem Validation** — extend aigent's deterministic
+validation from SKILL.md to the full Claude Code plugin ecosystem.
+Complements [plugin-dev](dev/plugin-dev.md) by mechanizing the rules it
+teaches through prose and LLM-driven agents:
+
+- Hook validation (`hooks.json`) — replaces plugin-dev's `validate-hook-schema.sh`
+- Agent file validation (`.md` frontmatter) — replaces plugin-dev's `validate-agent.sh`
+- Plugin manifest validation (`plugin.json`) — mechanizes `plugin-validator` agent checks
+- Command file validation (`.md` frontmatter) — first deterministic validator for commands
+- Cross-component consistency checks — unique to aigent, no plugin-dev equivalent
+
+5 issues ([#97](https://github.com/wkusnierczyk/aigent/issues/97)–[#101](https://github.com/wkusnierczyk/aigent/issues/101)).
+See [dev/plugin-dev.md](dev/plugin-dev.md) for the full analysis.
 
 ## CI/CD and Release Workflows
 
@@ -868,9 +1109,10 @@ Pushing a version tag (e.g., `v0.1.0`) triggers the release workflow:
 ## About and Licence
 
 ```
-aigent: AI Agent Skill Builder and Validator
-├─ version:    0.1.0
-├─ developer:  Wacław Kuśnierczyk
+aigent: Rust AI Agent Skills Tool
+├─ version:    0.3.0
+├─ author:     Wacław Kuśnierczyk
+├─ developer:  mailto:waclaw.kusnierczyk@gmail.com
 ├─ source:     https://github.com/wkusnierczyk/aigent
 └─ licence:    MIT https://opensource.org/licenses/MIT
 ```

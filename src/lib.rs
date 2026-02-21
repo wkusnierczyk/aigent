@@ -21,6 +21,8 @@
 
 #![warn(missing_docs)]
 
+/// Skill-to-plugin assembly: packages skills into Claude Code plugins.
+pub mod assembler;
 /// Skill builder: deterministic and LLM-enhanced skill generation.
 pub mod builder;
 /// Cross-skill conflict detection for skill collections.
@@ -31,6 +33,8 @@ pub mod diagnostics;
 pub mod errors;
 /// Auto-fix application for fixable diagnostics.
 pub mod fixer;
+/// SKILL.md formatting: canonical key ordering and markdown cleanup.
+pub mod formatter;
 /// Semantic lint checks for skill quality improvement.
 pub mod linter;
 /// Data model for SKILL.md frontmatter properties.
@@ -43,28 +47,37 @@ pub mod prompt;
 pub mod scorer;
 /// Directory structure validation for skill packages.
 pub mod structure;
+/// Fixture-based skill testing: run test suites defined in `tests.yml`.
+pub mod test_runner;
 /// Skill tester and previewer for evaluation-driven development.
 pub mod tester;
 /// Skill directory and metadata validator.
 pub mod validator;
 
 // Re-export key types at crate root for convenience.
+pub use assembler::{assemble_plugin, AssembleOptions, AssembleResult, AssembleWarning};
 pub use conflict::{detect_conflicts, detect_conflicts_with_threshold};
 #[doc(inline)]
 pub use diagnostics::{Diagnostic, Severity, ValidationTarget};
 #[doc(inline)]
 pub use errors::{AigentError, Result};
 pub use fixer::apply_fixes;
+pub use formatter::{format_content, format_skill, FormatResult};
 pub use linter::lint;
 #[doc(inline)]
 pub use models::SkillProperties;
-pub use parser::{find_skill_md, parse_frontmatter, read_properties, CLAUDE_CODE_KEYS, KNOWN_KEYS};
+pub use parser::{
+    find_skill_md, parse_frontmatter, read_body, read_properties, CLAUDE_CODE_KEYS, KNOWN_KEYS,
+};
 pub use prompt::{
     collect_skills, estimate_tokens, format_budget, to_prompt, to_prompt_format, PromptFormat,
     SkillEntry,
 };
 pub use scorer::{score, ScoreResult};
 pub use structure::validate_structure;
+pub use test_runner::{
+    format_text as format_test_suite, generate_fixture, run_test_suite, TestSuiteResult,
+};
 pub use tester::{test_skill, TestResult};
 pub use validator::{
     discover_skills, known_keys_for, validate, validate_metadata, validate_metadata_with_target,

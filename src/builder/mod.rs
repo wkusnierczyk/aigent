@@ -54,6 +54,11 @@ pub struct BuildResult {
     pub files: HashMap<String, String>,
     /// Directory where the skill was created.
     pub output_dir: PathBuf,
+    /// Warnings collected during generation (e.g., LLM fallback notices).
+    ///
+    /// These replace the previous `eprintln!` calls, giving library consumers
+    /// structured access to non-fatal issues that occurred during the build.
+    pub warnings: Vec<String>,
 }
 
 /// Clarity assessment result.
@@ -77,6 +82,7 @@ pub struct ClarityAssessment {
 pub fn build_skill(spec: &SkillSpec) -> Result<BuildResult> {
     // 0. Select provider (unless no_llm).
     let provider: Option<Box<dyn LlmProvider>> = if spec.no_llm { None } else { detect_provider() };
+    let mut warnings = Vec::new();
 
     // 1. Derive name (LLM with fallback to deterministic).
     let name = if let Some(explicit) = &spec.name {
@@ -85,7 +91,9 @@ pub fn build_skill(spec: &SkillSpec) -> Result<BuildResult> {
         match llm_derive_name(prov.as_ref(), &spec.purpose) {
             Ok(n) => n,
             Err(e) => {
-                eprintln!("warning: LLM name derivation failed ({e}), using deterministic");
+                warnings.push(format!(
+                    "LLM name derivation failed ({e}), using deterministic"
+                ));
                 deterministic::derive_name(&spec.purpose)
             }
         }
@@ -104,7 +112,9 @@ pub fn build_skill(spec: &SkillSpec) -> Result<BuildResult> {
         match llm_generate_description(prov.as_ref(), &spec.purpose, &name) {
             Ok(d) => d,
             Err(e) => {
-                eprintln!("warning: LLM description generation failed ({e}), using deterministic");
+                warnings.push(format!(
+                    "LLM description generation failed ({e}), using deterministic"
+                ));
                 generate_description(&spec.purpose, &name)
             }
         }
@@ -132,7 +142,9 @@ pub fn build_skill(spec: &SkillSpec) -> Result<BuildResult> {
         ) {
             Ok(b) => b,
             Err(e) => {
-                eprintln!("warning: LLM body generation failed ({e}), using deterministic");
+                warnings.push(format!(
+                    "LLM body generation failed ({e}), using deterministic"
+                ));
                 generate_body(&spec.purpose, &properties.name, &properties.description)
             }
         }
@@ -217,6 +229,7 @@ pub fn build_skill(spec: &SkillSpec) -> Result<BuildResult> {
         properties,
         files,
         output_dir,
+        warnings,
     })
 }
 
@@ -740,5 +753,24 @@ mod tests {
         let result = build_skill(&spec).unwrap();
         assert!(dir.join("SKILL.md").exists());
         assert_eq!(result.properties.name, "processing-pdf-files");
+    }
+
+    #[test]
+    fn build_result_has_empty_warnings_on_deterministic() {
+        let parent = tempdir().unwrap();
+        let dir = parent.path().join("processing-pdf-files");
+        let spec = SkillSpec {
+            purpose: "Process PDF files".to_string(),
+            name: Some("processing-pdf-files".to_string()),
+            output_dir: Some(dir),
+            no_llm: true,
+            ..Default::default()
+        };
+        let result = build_skill(&spec).unwrap();
+        assert!(
+            result.warnings.is_empty(),
+            "deterministic build should produce no warnings: {:?}",
+            result.warnings
+        );
     }
 }

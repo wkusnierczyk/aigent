@@ -56,13 +56,35 @@ pub struct CategoryResult {
 /// Result of a single check within a category.
 #[derive(Debug, Clone, Serialize)]
 pub struct CheckResult {
-    /// Human-readable label for this check.
+    /// Human-readable label for this check (shown when the check passes).
     pub label: String,
+    /// Label shown when the check fails (if different from the pass label).
+    ///
+    /// When `None`, the pass label is used for both states. This avoids
+    /// confusing output like `[FAIL] No unknown fields` — instead, the
+    /// fail label reads `Unknown fields found`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fail_label: Option<String>,
     /// Whether this check passed.
     pub passed: bool,
     /// Diagnostic message if the check failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+}
+
+impl CheckResult {
+    /// Returns the appropriate label for the current state.
+    ///
+    /// Uses `fail_label` when the check has failed and a fail-specific label
+    /// is defined; otherwise falls back to the standard `label`.
+    #[must_use]
+    pub fn display_label(&self) -> &str {
+        if self.passed {
+            &self.label
+        } else {
+            self.fail_label.as_deref().unwrap_or(&self.label)
+        }
+    }
 }
 
 /// Score a skill directory against Anthropic best-practices.
@@ -85,7 +107,7 @@ pub fn score(dir: &Path) -> ScoreResult {
     // Only run lint checks if the skill is parseable (no infrastructure errors).
     let quality = match crate::parser::read_properties(dir) {
         Ok(props) => {
-            let body = read_body(dir);
+            let body = crate::parser::read_body(dir);
             let lint_diags = linter::lint(&props, &body);
             score_quality(&lint_diags)
         }
@@ -115,6 +137,7 @@ fn score_structural(diags: &[Diagnostic]) -> CategoryResult {
     let checks = vec![
         CheckResult {
             label: "SKILL.md exists and is parseable".to_string(),
+            fail_label: Some("SKILL.md missing or unparseable".to_string()),
             passed: !diags.iter().any(|d| d.code == "E000"),
             message: diags
                 .iter()
@@ -123,6 +146,7 @@ fn score_structural(diags: &[Diagnostic]) -> CategoryResult {
         },
         CheckResult {
             label: "Name format valid".to_string(),
+            fail_label: Some("Name format invalid".to_string()),
             passed: !diags.iter().any(|d| {
                 matches!(
                     d.code,
@@ -149,6 +173,7 @@ fn score_structural(diags: &[Diagnostic]) -> CategoryResult {
         },
         CheckResult {
             label: "Description valid".to_string(),
+            fail_label: Some("Description invalid".to_string()),
             passed: !diags
                 .iter()
                 .any(|d| matches!(d.code, "E010" | "E011" | "E012")),
@@ -159,6 +184,7 @@ fn score_structural(diags: &[Diagnostic]) -> CategoryResult {
         },
         CheckResult {
             label: "Required fields present".to_string(),
+            fail_label: Some("Required fields missing".to_string()),
             passed: !diags
                 .iter()
                 .any(|d| matches!(d.code, "E014" | "E015" | "E016" | "E017" | "E018")),
@@ -169,6 +195,7 @@ fn score_structural(diags: &[Diagnostic]) -> CategoryResult {
         },
         CheckResult {
             label: "No unknown fields".to_string(),
+            fail_label: Some("Unknown fields found".to_string()),
             passed: !has_warnings,
             message: diags
                 .iter()
@@ -177,6 +204,7 @@ fn score_structural(diags: &[Diagnostic]) -> CategoryResult {
         },
         CheckResult {
             label: "Body within size limits".to_string(),
+            fail_label: Some("Body exceeds size limits".to_string()),
             passed: !diags.iter().any(|d| d.code == "W002"),
             message: diags
                 .iter()
@@ -205,6 +233,7 @@ fn score_quality(lint_diags: &[Diagnostic]) -> CategoryResult {
     let checks = vec![
         CheckResult {
             label: "Third-person description".to_string(),
+            fail_label: Some("Not third-person description".to_string()),
             passed: !lint_diags.iter().any(|d| d.code == linter::I001),
             message: lint_diags
                 .iter()
@@ -213,6 +242,7 @@ fn score_quality(lint_diags: &[Diagnostic]) -> CategoryResult {
         },
         CheckResult {
             label: "Trigger phrase present".to_string(),
+            fail_label: Some("Trigger phrase missing".to_string()),
             passed: !lint_diags.iter().any(|d| d.code == linter::I002),
             message: lint_diags
                 .iter()
@@ -221,6 +251,7 @@ fn score_quality(lint_diags: &[Diagnostic]) -> CategoryResult {
         },
         CheckResult {
             label: "Gerund name form".to_string(),
+            fail_label: Some("Non-gerund name form".to_string()),
             passed: !lint_diags.iter().any(|d| d.code == linter::I003),
             message: lint_diags
                 .iter()
@@ -229,6 +260,7 @@ fn score_quality(lint_diags: &[Diagnostic]) -> CategoryResult {
         },
         CheckResult {
             label: "Specific name".to_string(),
+            fail_label: Some("Generic name".to_string()),
             passed: !lint_diags.iter().any(|d| d.code == linter::I004),
             message: lint_diags
                 .iter()
@@ -237,6 +269,7 @@ fn score_quality(lint_diags: &[Diagnostic]) -> CategoryResult {
         },
         CheckResult {
             label: "Detailed description".to_string(),
+            fail_label: Some("Description too short".to_string()),
             passed: !lint_diags.iter().any(|d| d.code == linter::I005),
             message: lint_diags
                 .iter()
@@ -263,46 +296,35 @@ fn all_quality_checks_failed() -> CategoryResult {
         checks: vec![
             CheckResult {
                 label: "Third-person description".to_string(),
+                fail_label: Some("Not third-person description".to_string()),
                 passed: false,
                 message: Some("Skill could not be parsed".to_string()),
             },
             CheckResult {
                 label: "Trigger phrase present".to_string(),
+                fail_label: Some("Trigger phrase missing".to_string()),
                 passed: false,
                 message: Some("Skill could not be parsed".to_string()),
             },
             CheckResult {
                 label: "Gerund name form".to_string(),
+                fail_label: Some("Non-gerund name form".to_string()),
                 passed: false,
                 message: Some("Skill could not be parsed".to_string()),
             },
             CheckResult {
                 label: "Specific name".to_string(),
+                fail_label: Some("Generic name".to_string()),
                 passed: false,
                 message: Some("Skill could not be parsed".to_string()),
             },
             CheckResult {
                 label: "Detailed description".to_string(),
+                fail_label: Some("Description too short".to_string()),
                 passed: false,
                 message: Some("Skill could not be parsed".to_string()),
             },
         ],
-    }
-}
-
-/// Read the SKILL.md body (post-frontmatter) for lint scoring.
-fn read_body(dir: &Path) -> String {
-    let path = match crate::parser::find_skill_md(dir) {
-        Some(p) => p,
-        None => return String::new(),
-    };
-    let content = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return String::new(),
-    };
-    match crate::parser::parse_frontmatter(&content) {
-        Ok((_, body)) => body,
-        Err(_) => String::new(),
     }
 }
 
@@ -319,7 +341,8 @@ pub fn format_text(result: &ScoreResult) -> String {
     ));
     for check in &result.structural.checks {
         let status = if check.passed { "PASS" } else { "FAIL" };
-        out.push_str(&format!("  [{status}] {}\n", check.label));
+        let display_label = check.display_label();
+        out.push_str(&format!("  [{status}] {display_label}\n"));
         if let Some(msg) = &check.message {
             out.push_str(&format!("         {msg}\n"));
         }
@@ -331,7 +354,8 @@ pub fn format_text(result: &ScoreResult) -> String {
     ));
     for check in &result.quality.checks {
         let status = if check.passed { "PASS" } else { "FAIL" };
-        out.push_str(&format!("  [{status}] {}\n", check.label));
+        let display_label = check.display_label();
+        out.push_str(&format!("  [{status}] {display_label}\n"));
         if let Some(msg) = &check.message {
             out.push_str(&format!("         {msg}\n"));
         }
