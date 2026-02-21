@@ -5,10 +5,11 @@
 #   e.g.: ./scripts/bump-version.sh 0.3.0
 #
 # Updates:
-#   1. Cargo.toml         — version = "x.y.z"
-#   2. Cargo.lock          — regenerated via cargo check
-#   3. .claude-plugin/plugin.json — "version": "x.y.z"
-#   4. CHANGES.md          — adds ## [x.y.z] stub if not present
+#   1. Cargo.toml                  — version = "x.y.z"
+#   2. .claude-plugin/plugin.json  — "version": "x.y.z"
+#   3. CHANGES.md                  — adds ## [x.y.z] stub if not present
+#   4. README.md                   — --about block from live cargo run
+#   5. Cargo.lock                  — regenerated via cargo check
 
 set -euo pipefail
 
@@ -91,7 +92,48 @@ else
     echo "Warning: $CHANGES not found" >&2
 fi
 
-# 4. Cargo.lock — regenerate
+# 4. README.md — replace --about block with actual cargo run output
+README="$ROOT/README.md"
+if [[ -f "$README" ]]; then
+    # Build first so --about reflects the new version
+    ABOUT_TMP="$ROOT/.about.tmp"
+    (cd "$ROOT" && cargo run --quiet -- --about 2>/dev/null) > "$ABOUT_TMP"
+    if [[ -s "$ABOUT_TMP" ]]; then
+        # Replace the fenced code block after "## About and Licence".
+        # Reads replacement content from the temp file (portable across BSD/GNU awk).
+        AWK_SCRIPT='
+        /^## About and Licence/ { in_section=1 }
+        in_section && /^```$/ && !in_block {
+            in_block=1; print; next
+        }
+        in_section && in_block && /^```$/ {
+            in_block=0; in_section=0
+            while ((getline line < about_file) > 0) print line
+            close(about_file)
+            print; next
+        }
+        in_block { next }
+        { print }
+        '
+        awk -v about_file="$ABOUT_TMP" "$AWK_SCRIPT" "$README" > "$README.tmp"
+        if ! diff -q "$README" "$README.tmp" > /dev/null 2>&1; then
+            mv "$README.tmp" "$README"
+            echo "Updated README.md: --about block replaced with live output"
+            CHANGED=1
+        else
+            rm -f "$README.tmp"
+            echo "README.md: --about block already up to date"
+        fi
+        rm -f "$ABOUT_TMP"
+    else
+        rm -f "$ABOUT_TMP"
+        echo "Warning: cargo run -- --about produced no output (skipped)" >&2
+    fi
+else
+    echo "Warning: $README not found" >&2
+fi
+
+# 5. Cargo.lock — regenerate
 if [[ $CHANGED -eq 1 ]]; then
     echo "Regenerating Cargo.lock..."
     (cd "$ROOT" && cargo check --quiet 2>/dev/null)

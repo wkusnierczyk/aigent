@@ -1,5 +1,52 @@
 # Changes
 
+## [0.3.0] — 2026-02-21
+
+### Breaking
+
+- Renamed CLI subcommands: `validate` → `check`, `generate` → `new`,
+  `format` → `fmt`, `to-prompt` → `prompt` (#76)
+- Old names (`validate`, `generate`, `format`, `lint`) retained as hidden
+  aliases for backward compatibility, but may be removed in a future release
+- `tester` scoring formula changed to weighted combination:
+  name 15%, description 25%, trigger 20%, doc-comment 40% (#79)
+- `CheckResult` now uses distinct `fail_label` for pass/fail display (#78)
+
+### Added
+
+- `build` subcommand: assemble one or more skills into a Claude Code plugin
+  artifact with `plugin.json`, reference files, and structured warnings (#83)
+- `test` subcommand: fixture-based skill testing with YAML test suites,
+  `--generate` for auto-generating fixtures, and `--min-score` threshold (#84)
+- `fmt` subcommand: canonical SKILL.md formatting — key reordering, trailing
+  whitespace removal, blank line collapsing, idempotent output (#76)
+- `upgrade --full`: combined `--apply` + `--suggest` in a single pass (#80)
+- `check` superset command: runs `validate` + `lint` together, replacing
+  separate invocations (#76)
+- `AssembleWarning` public type for structured build warnings
+- `scripts/bump-version.sh`: portable version bump across Cargo.toml,
+  plugin.json, CHANGES.md, and Cargo.lock (#82)
+
+### Changed
+
+- `upgrade --apply` uses YAML AST-preserving insertion for metadata blocks,
+  handling partial metadata, comments, and custom indentation correctly (#81)
+- `BuildResult` includes structured `warnings` vec instead of `eprintln` (#45)
+- `read_body()` deduplicated into `parser.rs` as single source of truth (#82)
+
+### Fixed
+
+- Path traversal validation in assembler (`is_unsafe_name`) rejects `..`
+  components and absolute paths
+- JSON injection prevented: plugin.json generation uses `serde_json` instead
+  of string formatting
+- `formatter` handles empty frontmatter without panicking
+- `main.rs` exit codes: `test --generate` and `fmt` properly track errors
+- `main.rs` parse error diagnostics shown in `check --no-validate`
+- Delimiter matching uses `trim_end()` for robustness
+- Doc-comment activation thresholds corrected to 0.4/0.15 in tester
+- `bump-version.sh` uses portable `sedi()` wrapper for GNU/BSD sed
+
 ## [0.2.3] — 2026-02-20
 
 ### Added
