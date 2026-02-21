@@ -31,6 +31,8 @@ pub mod diagnostics;
 pub mod errors;
 /// Auto-fix application for fixable diagnostics.
 pub mod fixer;
+/// SKILL.md formatting: canonical key ordering and markdown cleanup.
+pub mod formatter;
 /// Semantic lint checks for skill quality improvement.
 pub mod linter;
 /// Data model for SKILL.md frontmatter properties.
@@ -55,6 +57,7 @@ pub use diagnostics::{Diagnostic, Severity, ValidationTarget};
 #[doc(inline)]
 pub use errors::{AigentError, Result};
 pub use fixer::apply_fixes;
+pub use formatter::{format_content, format_skill, FormatResult};
 pub use linter::lint;
 #[doc(inline)]
 pub use models::SkillProperties;

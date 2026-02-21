@@ -27,7 +27,7 @@ If `aigent` is on `$PATH`, use the CLI for authoritative skill generation:
 
 1. Build the skill:
    ```bash
-   aigent build "<purpose>" --dir .claude/skills/<name>/
+   aigent new "<purpose>" --dir .claude/skills/<name>/
    ```
 
 2. Validate the result:
