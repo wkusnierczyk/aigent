@@ -186,7 +186,6 @@ enum Commands {
         recursive: bool,
     },
     /// Probe a skill's activation surface with a sample query
-    #[command(alias = "test")]
     Probe {
         /// Path to skill directory or SKILL.md file
         #[arg(name = "skill-dir")]
@@ -211,6 +210,20 @@ enum Commands {
         /// Run validation on assembled skills
         #[arg(long)]
         validate: bool,
+    },
+    /// Run fixture-based test suite from tests.yml
+    Test {
+        /// Paths to skill directories
+        skill_dirs: Vec<PathBuf>,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+        /// Discover skills recursively
+        #[arg(long)]
+        recursive: bool,
+        /// Generate a starter tests.yml for skills that lack one
+        #[arg(long)]
+        generate: bool,
     },
     /// Check a skill for upgrade opportunities
     Upgrade {
@@ -753,6 +766,88 @@ fn main() {
                     eprintln!("aigent build: {e}");
                     std::process::exit(1);
                 }
+            }
+        }
+        Some(Commands::Test {
+            skill_dirs,
+            format,
+            recursive,
+            generate,
+        }) => {
+            let dirs = resolve_dirs(&skill_dirs, recursive);
+            if dirs.is_empty() {
+                if recursive {
+                    eprintln!("No SKILL.md files found under the specified path(s).");
+                } else {
+                    eprintln!("Usage: aigent test <skill-dir> [<skill-dir>...]");
+                }
+                std::process::exit(1);
+            }
+
+            if generate {
+                for dir in &dirs {
+                    match aigent::generate_fixture(dir) {
+                        Ok(yaml) => {
+                            let fixture_path = dir.join("tests.yml");
+                            if fixture_path.exists() {
+                                eprintln!("Skipping {} — tests.yml already exists", dir.display());
+                            } else {
+                                std::fs::write(&fixture_path, &yaml).unwrap_or_else(|e| {
+                                    eprintln!(
+                                        "aigent test: failed to write {}: {e}",
+                                        fixture_path.display()
+                                    );
+                                    std::process::exit(1);
+                                });
+                                eprintln!("Generated {}", fixture_path.display());
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("aigent test: {}: {e}", dir.display());
+                        }
+                    }
+                }
+                return;
+            }
+
+            let mut total_passed = 0;
+            let mut total_failed = 0;
+            let mut any_error = false;
+
+            for dir in &dirs {
+                match aigent::run_test_suite(dir) {
+                    Ok(result) => {
+                        match format {
+                            Format::Text => {
+                                if dirs.len() > 1 {
+                                    eprintln!("{}:", dir.display());
+                                }
+                                eprint!("{}", aigent::format_test_suite(&result));
+                            }
+                            Format::Json => {
+                                let json = serde_json::to_string_pretty(&result).unwrap();
+                                println!("{json}");
+                            }
+                        }
+                        total_passed += result.passed;
+                        total_failed += result.failed;
+                    }
+                    Err(e) => {
+                        eprintln!("aigent test: {}: {e}", dir.display());
+                        any_error = true;
+                    }
+                }
+            }
+
+            if dirs.len() > 1 {
+                eprintln!(
+                    "\nTotal: {total_passed} passed, {total_failed} failed, {} total",
+                    total_passed + total_failed
+                );
+            }
+
+            if total_failed > 0 || any_error {
+                std::process::exit(1);
             }
         }
         Some(Commands::Upgrade {

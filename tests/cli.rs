@@ -1162,13 +1162,13 @@ fn doc_recursive_discovers_nested_skills() {
 // ── M12: test subcommand ─────────────────────────────────────────
 
 #[test]
-fn test_skill_shows_activation_status() {
+fn probe_skill_shows_activation_status() {
     let (_parent, dir) = make_skill_dir(
         "test-skill-activate",
         "---\nname: test-skill-activate\ndescription: Processes PDF files and extracts text\n---\nBody.\n",
     );
     aigent()
-        .args(["test", dir.to_str().unwrap(), "process PDF files"])
+        .args(["probe", dir.to_str().unwrap(), "process PDF files"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Activation:"))
@@ -1176,27 +1176,27 @@ fn test_skill_shows_activation_status() {
 }
 
 #[test]
-fn test_skill_no_match_query() {
+fn probe_skill_no_match_query() {
     let (_parent, dir) = make_skill_dir(
         "test-no-match",
         "---\nname: test-no-match\ndescription: Manages database connections\n---\nBody.\n",
     );
     aigent()
-        .args(["test", dir.to_str().unwrap(), "deploy kubernetes cluster"])
+        .args(["probe", dir.to_str().unwrap(), "deploy kubernetes cluster"])
         .assert()
         .success()
         .stdout(predicate::str::contains("NONE"));
 }
 
 #[test]
-fn test_skill_json_format() {
+fn probe_skill_json_format() {
     let (_parent, dir) = make_skill_dir(
         "test-json",
         "---\nname: test-json\ndescription: Processes PDF files\n---\nBody.\n",
     );
     let output = aigent()
         .args([
-            "test",
+            "probe",
             dir.to_str().unwrap(),
             "process PDF",
             "--format",
@@ -1212,9 +1212,9 @@ fn test_skill_json_format() {
 }
 
 #[test]
-fn test_skill_missing_dir_exits_nonzero() {
+fn probe_skill_missing_dir_exits_nonzero() {
     aigent()
-        .args(["test", "/nonexistent/skill", "some query"])
+        .args(["probe", "/nonexistent/skill", "some query"])
         .assert()
         .failure();
 }
@@ -1471,14 +1471,14 @@ fn probe_command_shows_activation() {
 }
 
 #[test]
-fn test_alias_maps_to_probe() {
+fn probe_command_accepts_query() {
     let (_parent, dir) = make_skill_dir(
         "processing-pdf-files",
         "---\nname: processing-pdf-files\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
     );
-    // `test` is an alias for `probe`.
+    // `probe` works directly (no `test` alias — `test` is now the fixture runner).
     aigent()
-        .args(["test", dir.to_str().unwrap(), "process PDF files"])
+        .args(["probe", dir.to_str().unwrap(), "process PDF files"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Activation:"));
@@ -1750,4 +1750,113 @@ fn new_interactive_flag_accepted() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("cancelled"));
+}
+
+// ── M13: test subcommand (fixture-based) ─────────────────────────
+
+#[test]
+fn test_run_suite_all_pass() {
+    let (_parent, dir) = make_skill_dir(
+        "test-suite-pass",
+        "---\nname: test-suite-pass\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
+    );
+    fs::write(
+        dir.join("tests.yml"),
+        "queries:\n  - input: \"process PDF files\"\n    should_match: true\n  - input: \"deploy kubernetes\"\n    should_match: false\n",
+    )
+    .unwrap();
+    aigent()
+        .args(["test", dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("2 passed, 0 failed"));
+}
+
+#[test]
+fn test_run_suite_with_failure() {
+    let (_parent, dir) = make_skill_dir(
+        "test-suite-fail",
+        "---\nname: test-suite-fail\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
+    );
+    fs::write(
+        dir.join("tests.yml"),
+        "queries:\n  - input: \"process PDF files\"\n    should_match: false\n",
+    )
+    .unwrap();
+    aigent()
+        .args(["test", dir.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("0 passed, 1 failed"));
+}
+
+#[test]
+fn test_missing_tests_yml_exits_nonzero() {
+    let (_parent, dir) = make_skill_dir(
+        "test-no-fixture",
+        "---\nname: test-no-fixture\ndescription: Does things\n---\nBody.\n",
+    );
+    aigent()
+        .args(["test", dir.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no tests.yml"));
+}
+
+#[test]
+fn test_generate_creates_tests_yml() {
+    let (_parent, dir) = make_skill_dir(
+        "test-gen",
+        "---\nname: test-gen\ndescription: Processes documents. Use when handling files.\n---\nBody.\n",
+    );
+    aigent()
+        .args(["test", dir.to_str().unwrap(), "--generate"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Generated"));
+    let fixture_path = dir.join("tests.yml");
+    assert!(fixture_path.exists());
+    let content = fs::read_to_string(&fixture_path).unwrap();
+    assert!(content.contains("queries:"));
+    assert!(content.contains("should_match: true"));
+    assert!(content.contains("should_match: false"));
+}
+
+#[test]
+fn test_generate_skips_existing_tests_yml() {
+    let (_parent, dir) = make_skill_dir(
+        "test-gen-exists",
+        "---\nname: test-gen-exists\ndescription: Does things\n---\nBody.\n",
+    );
+    fs::write(dir.join("tests.yml"), "queries: []\n").unwrap();
+    aigent()
+        .args(["test", dir.to_str().unwrap(), "--generate"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("already exists"));
+    // Content should be unchanged.
+    let content = fs::read_to_string(dir.join("tests.yml")).unwrap();
+    assert_eq!(content, "queries: []\n");
+}
+
+#[test]
+fn test_json_format_outputs_suite_result() {
+    let (_parent, dir) = make_skill_dir(
+        "test-json-suite",
+        "---\nname: test-json-suite\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
+    );
+    fs::write(
+        dir.join("tests.yml"),
+        "queries:\n  - input: \"process PDF files\"\n    should_match: true\n",
+    )
+    .unwrap();
+    let output = aigent()
+        .args(["test", dir.to_str().unwrap(), "--format", "json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["passed"], 1);
+    assert_eq!(json["failed"], 0);
 }

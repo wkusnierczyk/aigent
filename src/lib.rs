@@ -47,6 +47,8 @@ pub mod prompt;
 pub mod scorer;
 /// Directory structure validation for skill packages.
 pub mod structure;
+/// Fixture-based skill testing: run test suites defined in `tests.yml`.
+pub mod test_runner;
 /// Skill tester and previewer for evaluation-driven development.
 pub mod tester;
 /// Skill directory and metadata validator.
@@ -73,6 +75,9 @@ pub use prompt::{
 };
 pub use scorer::{score, ScoreResult};
 pub use structure::validate_structure;
+pub use test_runner::{
+    format_text as format_test_suite, generate_fixture, run_test_suite, TestSuiteResult,
+};
 pub use tester::{test_skill, TestResult};
 pub use validator::{
     discover_skills, known_keys_for, validate, validate_metadata, validate_metadata_with_target,
