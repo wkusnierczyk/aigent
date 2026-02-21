@@ -12,7 +12,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::diagnostics::{Diagnostic, Severity, S001, S003, S004};
+use crate::diagnostics::{Diagnostic, Severity, S001, S003, S004, S006};
 
 #[cfg(unix)]
 use crate::diagnostics::S002;
@@ -38,6 +38,7 @@ static LINK_RE: LazyLock<Regex> = LazyLock::new(|| {
 /// - S002: Scripts (.sh) have execute permission (Unix only)
 /// - S003: File references exceed 1 level of depth
 /// - S004: Excessive directory nesting depth
+/// - S006: Path traversal in reference link
 ///
 /// # Arguments
 ///
@@ -53,7 +54,7 @@ pub fn validate_structure(dir: &Path) -> Vec<Diagnostic> {
     // Read the SKILL.md body for reference checking.
     let body = crate::parser::read_body(dir);
 
-    // S001 + S003: Check file references in the body.
+    // S001 + S003 + S006: Check file references in the body.
     diags.extend(check_references(dir, &body));
 
     // S002: Check script permissions.
@@ -65,11 +66,19 @@ pub fn validate_structure(dir: &Path) -> Vec<Diagnostic> {
     diags
 }
 
-/// S001 + S003: Check file references in the markdown body.
+/// Returns `true` if the given path string contains `..` (parent directory) components.
+fn contains_path_traversal(path: &str) -> bool {
+    Path::new(path)
+        .components()
+        .any(|c| c == std::path::Component::ParentDir)
+}
+
+/// S001 + S003 + S006: Check file references in the markdown body.
 ///
 /// Extracts `[text](path)` and `![alt](path)` patterns, skipping URLs
-/// and anchors. Reports S001 if the referenced file doesn't exist,
-/// S003 if the reference path exceeds `MAX_REFERENCE_DEPTH` levels.
+/// and anchors. Reports S006 if the path contains `..` traversal components,
+/// S003 if the reference path exceeds `MAX_REFERENCE_DEPTH` levels, and
+/// S001 if the referenced file doesn't exist.
 fn check_references(dir: &Path, body: &str) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
 
@@ -86,6 +95,22 @@ fn check_references(dir: &Path, body: &str) -> Vec<Diagnostic> {
 
         // Strip fragment from path (e.g., "file.md#section").
         let clean_path = path_str.split('#').next().unwrap_or(path_str);
+
+        // Check for path traversal (S006).
+        if contains_path_traversal(clean_path) {
+            diags.push(
+                Diagnostic::new(
+                    Severity::Warning,
+                    S006,
+                    format!("path traversal in reference link: '{clean_path}'"),
+                )
+                .with_field("body")
+                .with_suggestion(
+                    "Remove '..' components — references must stay within the skill directory",
+                ),
+            );
+            continue;
+        }
 
         // Check reference depth (S003).
         let depth = clean_path.matches('/').count();
@@ -504,6 +529,96 @@ mod tests {
         assert!(
             diags.iter().all(|d| d.is_warning()),
             "all structure diagnostics should be warnings: {diags:?}",
+        );
+    }
+
+    // ── S006: Path traversal in reference link ───────────────────────
+
+    #[test]
+    fn s006_parent_traversal_detected() {
+        let (_parent, dir) = make_skill(
+            "my-skill",
+            "---\nname: my-skill\ndescription: desc\n---\n\nSee [secret](../../../etc/passwd)\n",
+        );
+        let diags = validate_structure(&dir);
+        assert!(
+            diags.iter().any(|d| d.code == S006),
+            "expected S006 for ../../../etc/passwd, got: {diags:?}",
+        );
+    }
+
+    #[test]
+    fn s006_dot_slash_no_traversal() {
+        let (_parent, dir) = make_skill(
+            "my-skill",
+            "---\nname: my-skill\ndescription: desc\n---\n\nSee [script](./scripts/run.sh)\n",
+        );
+        fs::create_dir(dir.join("scripts")).unwrap();
+        fs::write(dir.join("scripts/run.sh"), "#!/bin/bash").unwrap();
+        let diags = validate_structure(&dir);
+        assert!(
+            !diags.iter().any(|d| d.code == S006),
+            "expected no S006 for ./scripts/run.sh, got: {diags:?}",
+        );
+    }
+
+    #[test]
+    fn s006_embedded_dotdot_detected() {
+        let (_parent, dir) = make_skill(
+            "my-skill",
+            "---\nname: my-skill\ndescription: desc\n---\n\nSee [file](sub/../file.md)\n",
+        );
+        let diags = validate_structure(&dir);
+        assert!(
+            diags.iter().any(|d| d.code == S006),
+            "expected S006 for sub/../file.md, got: {diags:?}",
+        );
+    }
+
+    #[test]
+    fn s006_normal_relative_no_traversal() {
+        let (_parent, dir) = make_skill(
+            "my-skill",
+            "---\nname: my-skill\ndescription: desc\n---\n\nSee [setup](scripts/setup.sh)\n",
+        );
+        fs::create_dir(dir.join("scripts")).unwrap();
+        fs::write(dir.join("scripts/setup.sh"), "#!/bin/bash").unwrap();
+        let diags = validate_structure(&dir);
+        assert!(
+            !diags.iter().any(|d| d.code == S006),
+            "expected no S006 for scripts/setup.sh, got: {diags:?}",
+        );
+    }
+
+    #[test]
+    fn s006_multiple_traversals_produce_multiple_diagnostics() {
+        let (_parent, dir) = make_skill(
+            "my-skill",
+            "---\nname: my-skill\ndescription: desc\n---\n\nSee [a](../secret.txt) and [b](../../other.txt) and [c](sub/../../../leak.md)\n",
+        );
+        let diags = validate_structure(&dir);
+        let s006_count = diags.iter().filter(|d| d.code == S006).count();
+        assert_eq!(
+            s006_count, 3,
+            "expected 3 S006 diagnostics, got {s006_count}: {diags:?}",
+        );
+    }
+
+    #[test]
+    fn s006_traversal_skips_existence_check() {
+        // Path traversal should NOT also produce S001 (missing file).
+        let (_parent, dir) = make_skill(
+            "my-skill",
+            "---\nname: my-skill\ndescription: desc\n---\n\nSee [file](../escape.md)\n",
+        );
+        let diags = validate_structure(&dir);
+        assert!(
+            diags.iter().any(|d| d.code == S006),
+            "expected S006 for traversal, got: {diags:?}",
+        );
+        assert!(
+            !diags.iter().any(|d| d.code == S001),
+            "traversal path should not also trigger S001, got: {diags:?}",
         );
     }
 }
