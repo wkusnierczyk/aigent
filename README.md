@@ -1242,27 +1242,33 @@ The `main` branch is protected: direct pushes are not allowed. Changes are
 merged via squash-merge of pull requests only, requiring green CI/CD and positive reviews.
 
 Every pull request runs the CI pipeline on a
-**three-OS, five-job matrix**
-(Linux x86_64, Linux aarch64, macOS x86_64, macOS aarch64, Windows x86_64):
+**OS** x **architecture** matrix.
 
-1. **Formatting** — `cargo fmt --check`
-2. **Linting** — `cargo clippy -- -D warnings`
-3. **Testing** — `cargo test`
-4. **Release build** — `cargo build --release`
+| Architecture | OS | Full name |
+| --- | --- | --- |
+| x86_64 | linux | `x86_64-unknown-linux-gnu` |
+| aarch64 | linux | `aarch64-unknown-linux-gnu` (via `cross`) |
+| x86_64 | macos | `x86_64-apple-darwin` |
+| aarch64 | macos | `aarch64-apple-darwin` |
+| x86_64 | windows | `x86_64-pc-windows-msvc` |
+
+| Step | Command |
+| --- | --- |
+| Formatting | `cargo fmt --check` |
+| Linting | `cargo clippy -- -D warnings` |
+| Testing | `cargo test` |
+| Release build | `cargo build --release` |
 
 ### Release workflow
 
-Pushing a version tag (e.g., `v0.1.0`) triggers the release workflow:
+Pushing a version tag (e.g., `v0.1.0`) triggers the release workflow (release on tag):
 
-1. **Test** — full test suite on Ubuntu
-2. **Build** — cross-compile for five targets:
-   - `x86_64-unknown-linux-gnu`
-   - `aarch64-unknown-linux-gnu` (via `cross`)
-   - `x86_64-apple-darwin`
-   - `aarch64-apple-darwin`
-   - `x86_64-pc-windows-msvc`
-3. **Release** — create GitHub Release with changelog and binary assets
-4. **Publish** — publish to [crates.io](https://crates.io/crates/aigent)
+| Step | Action |
+| --- | --- |
+| Test | Full test suite on Ubuntu |
+| Build | Cross-compile (five targets, see CI/CD) |
+| Release | Create GitHub Release with changelog and binary assets |
+| Publish | Publish to [crates.io](https://crates.io/crates/aigent) |
 
 ## References
 
