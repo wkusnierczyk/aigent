@@ -469,9 +469,19 @@ fn main() {
                 }
 
                 // Always run semantic lint checks (the core of `check`).
-                if let Ok(props) = aigent::read_properties(dir) {
-                    let body = aigent::read_body(dir);
-                    diags.extend(aigent::lint(&props, &body));
+                match aigent::read_properties(dir) {
+                    Ok(props) => {
+                        let body = aigent::read_body(dir);
+                        diags.extend(aigent::lint(&props, &body));
+                    }
+                    Err(e) => {
+                        // Report parse failures as diagnostics rather than silently skipping.
+                        diags.push(Diagnostic::new(
+                            aigent::Severity::Error,
+                            "E000",
+                            format!("cannot read properties: {e}"),
+                        ));
+                    }
                 }
 
                 // Append structure checks if requested.
@@ -756,6 +766,9 @@ fn main() {
             };
             match aigent::assemble_plugin(&dirs, &opts) {
                 Ok(result) => {
+                    for w in &result.warnings {
+                        eprintln!("warning: {}: {}", w.dir.display(), w.message);
+                    }
                     println!(
                         "Assembled {} skill(s) into {}",
                         result.skills_count,
@@ -785,6 +798,7 @@ fn main() {
             }
 
             if generate {
+                let mut any_error = false;
                 for dir in &dirs {
                     match aigent::generate_fixture(dir) {
                         Ok(yaml) => {
@@ -804,8 +818,12 @@ fn main() {
                         }
                         Err(e) => {
                             eprintln!("aigent test: {}: {e}", dir.display());
+                            any_error = true;
                         }
                     }
+                }
+                if any_error {
+                    std::process::exit(1);
                 }
                 return;
             }
@@ -909,6 +927,7 @@ fn main() {
             }
 
             let mut any_changed = false;
+            let mut any_error = false;
             for dir in &dirs {
                 match aigent::format_skill(dir) {
                     Ok(result) => {
@@ -931,11 +950,12 @@ fn main() {
                     }
                     Err(e) => {
                         eprintln!("aigent fmt: {}: {e}", dir.display());
+                        any_error = true;
                     }
                 }
             }
 
-            if check && any_changed {
+            if any_error || (check && any_changed) {
                 std::process::exit(1);
             }
         }
@@ -1189,7 +1209,7 @@ fn extract_frontmatter_lines(content: &str) -> Vec<String> {
     content
         .lines()
         .skip(1) // skip opening ---
-        .take_while(|l| *l != "---")
+        .take_while(|l| l.trim_end() != "---")
         .map(|l| l.to_string())
         .collect()
 }

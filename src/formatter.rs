@@ -81,7 +81,12 @@ pub fn format_content(original: &str) -> Result<String> {
         message: "missing closing --- delimiter".into(),
     })?;
 
-    let yaml_str = &after_first[1..close_pos]; // skip the \n after opening ---
+    // Skip the \n after opening ---; handle empty frontmatter (close_pos == 0).
+    let yaml_str = if close_pos > 0 {
+        &after_first[1..close_pos]
+    } else {
+        ""
+    };
     let body_start = close_pos + 5; // skip \n---\n
     let body = if body_start <= after_first.len() {
         &after_first[body_start..]
@@ -401,5 +406,12 @@ mod tests {
         let input = "---\nname: my-skill\ndescription: Does things\n---\n";
         let result = format_content(input).unwrap();
         assert!(result.ends_with("---\n\n"), "empty body should get newline");
+    }
+
+    #[test]
+    fn format_empty_frontmatter_does_not_panic() {
+        let input = "---\n---\nBody.\n";
+        let result = format_content(input).unwrap();
+        assert!(result.contains("---\n\n---\n"));
     }
 }

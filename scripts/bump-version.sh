@@ -12,6 +12,15 @@
 
 set -euo pipefail
 
+# Portable in-place sed: BSD (macOS) requires -i '', GNU (Linux) requires -i alone.
+sedi() {
+    if sed --version 2>/dev/null | grep -q 'GNU'; then
+        sed -i "$@"
+    else
+        sed -i '' "$@"
+    fi
+}
+
 VERSION="${1:-}"
 
 if [[ -z "$VERSION" ]]; then
@@ -35,7 +44,7 @@ CHANGED=0
 CARGO_TOML="$ROOT/Cargo.toml"
 CURRENT=$(grep '^version' "$CARGO_TOML" | head -1 | sed 's/.*"\(.*\)".*/\1/')
 if [[ "$CURRENT" != "$VERSION" ]]; then
-    sed -i '' "s/^version = \".*\"/version = \"$VERSION\"/" "$CARGO_TOML"
+    sedi "s/^version = \".*\"/version = \"$VERSION\"/" "$CARGO_TOML"
     echo "Updated Cargo.toml: $CURRENT -> $VERSION"
     CHANGED=1
 else
@@ -47,7 +56,7 @@ PLUGIN_JSON="$ROOT/.claude-plugin/plugin.json"
 if [[ -f "$PLUGIN_JSON" ]]; then
     PLUGIN_CURRENT=$(grep '"version"' "$PLUGIN_JSON" | sed 's/.*: *"\(.*\)".*/\1/')
     if [[ "$PLUGIN_CURRENT" != "$VERSION" ]]; then
-        sed -i '' "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" "$PLUGIN_JSON"
+        sedi "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" "$PLUGIN_JSON"
         echo "Updated plugin.json: $PLUGIN_CURRENT -> $VERSION"
         CHANGED=1
     else
@@ -64,11 +73,17 @@ if [[ -f "$CHANGES" ]]; then
         echo "CHANGES.md: entry for $VERSION already exists"
     else
         DATE=$(date +%Y-%m-%d)
-        STUB="## [$VERSION] — $DATE\n\n### Added\n\n### Changed\n\n### Fixed\n"
-        # Insert after the first line (title)
-        sed -i '' "2i\\
-\\
-$STUB" "$CHANGES"
+        STUB="## [$VERSION] — $DATE
+
+### Added
+
+### Changed
+
+### Fixed
+"
+        # Insert after the first line (title) using a temp file for portability.
+        { head -1 "$CHANGES"; printf '\n%s\n' "$STUB"; tail -n +2 "$CHANGES"; } > "$CHANGES.tmp"
+        mv "$CHANGES.tmp" "$CHANGES"
         echo "Updated CHANGES.md: added [$VERSION] stub"
         CHANGED=1
     fi

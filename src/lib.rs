@@ -55,7 +55,7 @@ pub mod tester;
 pub mod validator;
 
 // Re-export key types at crate root for convenience.
-pub use assembler::{assemble_plugin, AssembleOptions, AssembleResult};
+pub use assembler::{assemble_plugin, AssembleOptions, AssembleResult, AssembleWarning};
 pub use conflict::{detect_conflicts, detect_conflicts_with_threshold};
 #[doc(inline)]
 pub use diagnostics::{Diagnostic, Severity, ValidationTarget};

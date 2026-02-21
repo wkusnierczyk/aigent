@@ -9,6 +9,15 @@ use std::path::{Path, PathBuf};
 use crate::errors::{AigentError, Result};
 use crate::parser::{find_skill_md, read_properties};
 
+/// Assembled skill metadata collected during plugin assembly.
+#[derive(Debug)]
+pub struct AssembleWarning {
+    /// The skill directory that caused the warning.
+    pub dir: PathBuf,
+    /// A human-readable warning message.
+    pub message: String,
+}
+
 /// Options for plugin assembly.
 #[derive(Debug)]
 pub struct AssembleOptions {
@@ -27,6 +36,8 @@ pub struct AssembleResult {
     pub plugin_dir: PathBuf,
     /// Number of skills included.
     pub skills_count: usize,
+    /// Non-fatal warnings encountered during assembly.
+    pub warnings: Vec<AssembleWarning>,
 }
 
 /// Assemble skills into a plugin directory.
@@ -59,18 +70,36 @@ pub fn assemble_plugin(skill_dirs: &[&Path], opts: &AssembleOptions) -> Result<A
 
     // Collect valid skills.
     let mut skills: Vec<(String, PathBuf)> = Vec::new();
+    let mut warnings: Vec<AssembleWarning> = Vec::new();
     for dir in skill_dirs {
         if let Some(skill_path) = find_skill_md(dir) {
             match read_properties(dir) {
                 Ok(props) => {
+                    // Validate skill name to prevent path traversal.
+                    if is_unsafe_name(&props.name) {
+                        warnings.push(AssembleWarning {
+                            dir: dir.to_path_buf(),
+                            message: format!(
+                                "skipping: unsafe skill name '{}' (contains path separators or '..')",
+                                props.name
+                            ),
+                        });
+                        continue;
+                    }
                     skills.push((props.name.clone(), skill_path));
                 }
                 Err(e) => {
-                    eprintln!("warning: skipping {}: {e}", dir.display());
+                    warnings.push(AssembleWarning {
+                        dir: dir.to_path_buf(),
+                        message: format!("skipping: {e}"),
+                    });
                 }
             }
         } else {
-            eprintln!("warning: no SKILL.md in {}", dir.display());
+            warnings.push(AssembleWarning {
+                dir: dir.to_path_buf(),
+                message: "no SKILL.md found".into(),
+            });
         }
     }
 
@@ -117,7 +146,10 @@ pub fn assemble_plugin(skill_dirs: &[&Path], opts: &AssembleOptions) -> Result<A
             if diags.iter().any(|d| d.is_error()) {
                 all_valid = false;
                 for d in &diags {
-                    eprintln!("{name}: {d}");
+                    warnings.push(AssembleWarning {
+                        dir: dest_dir.clone(),
+                        message: format!("{name}: {d}"),
+                    });
                 }
             }
         }
@@ -129,13 +161,26 @@ pub fn assemble_plugin(skill_dirs: &[&Path], opts: &AssembleOptions) -> Result<A
     }
 
     // Generate plugin.json.
-    let plugin_json = generate_plugin_json(&plugin_name, &skills);
+    let plugin_json = generate_plugin_json(&plugin_name, &skills)?;
     std::fs::write(out.join("plugin.json"), plugin_json)?;
 
     Ok(AssembleResult {
         plugin_dir: out.clone(),
         skills_count: skills.len(),
+        warnings,
     })
+}
+
+/// Check whether a skill name is unsafe for use as a directory component.
+///
+/// Rejects names containing path separators (`/`, `\`), parent traversal (`..`),
+/// or that are empty.
+fn is_unsafe_name(name: &str) -> bool {
+    name.is_empty()
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains("..")
+        || name == "."
 }
 
 /// Copy non-SKILL.md files from source dir to destination dir.
@@ -187,25 +232,21 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
 }
 
 /// Generate plugin.json content from skill metadata.
-fn generate_plugin_json(name: &str, skills: &[(String, PathBuf)]) -> String {
-    let skill_names: Vec<String> = skills
-        .iter()
-        .map(|(name, _)| format!("    \"{}\"", name))
-        .collect();
+///
+/// Uses `serde_json` for proper escaping of all string values.
+fn generate_plugin_json(name: &str, skills: &[(String, PathBuf)]) -> Result<String> {
+    let skill_names: Vec<&str> = skills.iter().map(|(name, _)| name.as_str()).collect();
 
-    format!(
-        r#"{{
-  "name": "{name}",
-  "description": "Plugin assembled from {count} skill(s)",
-  "version": "0.1.0",
-  "skills": [
-{skills_list}
-  ]
-}}"#,
-        name = name,
-        count = skills.len(),
-        skills_list = skill_names.join(",\n"),
-    )
+    let json = serde_json::json!({
+        "name": name,
+        "description": format!("Plugin assembled from {} skill(s)", skills.len()),
+        "version": "0.1.0",
+        "skills": skill_names,
+    });
+
+    serde_json::to_string_pretty(&json).map_err(|e| AigentError::Build {
+        message: format!("failed to generate plugin.json: {e}"),
+    })
 }
 
 #[cfg(test)]
@@ -362,5 +403,70 @@ mod tests {
         let json_str = fs::read_to_string(out.join("plugin.json")).unwrap();
         let json: serde_json::Value = serde_json::from_str(&json_str).unwrap();
         assert_eq!(json["name"], "first-skill");
+    }
+
+    #[test]
+    fn assemble_rejects_path_traversal_name() {
+        let parent = tempdir().unwrap();
+        let skill = make_skill(
+            parent.path(),
+            "evil-skill",
+            "---\nname: ../../../etc/passwd\ndescription: Malicious\n---\nBody.\n",
+        );
+        let out = parent.path().join("output");
+        let opts = AssembleOptions {
+            output_dir: out,
+            name: None,
+            validate: false,
+        };
+        // Should fail because the only skill has an unsafe name.
+        let result = assemble_plugin(&[skill.as_path()], &opts);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn assemble_warns_on_unsafe_name_but_continues_with_others() {
+        let parent = tempdir().unwrap();
+        let bad = make_skill(
+            parent.path(),
+            "bad",
+            "---\nname: ../escape\ndescription: Malicious\n---\nBody.\n",
+        );
+        let good = make_skill(
+            parent.path(),
+            "good-skill",
+            "---\nname: good-skill\ndescription: Legit\n---\nBody.\n",
+        );
+        let out = parent.path().join("output");
+        let opts = AssembleOptions {
+            output_dir: out.clone(),
+            name: None,
+            validate: false,
+        };
+        let result = assemble_plugin(&[bad.as_path(), good.as_path()], &opts).unwrap();
+        assert_eq!(result.skills_count, 1);
+        assert!(!result.warnings.is_empty());
+        assert!(result.warnings[0].message.contains("unsafe skill name"));
+    }
+
+    #[test]
+    fn generate_plugin_json_escapes_special_characters() {
+        let skills = vec![("skill-with-\"quotes\"".to_string(), PathBuf::from("a.md"))];
+        let json_str = generate_plugin_json("name-with-\"quotes\"", &skills).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(json["name"], "name-with-\"quotes\"");
+        assert_eq!(json["skills"][0], "skill-with-\"quotes\"");
+    }
+
+    #[test]
+    fn is_unsafe_name_detects_traversal() {
+        assert!(is_unsafe_name("../etc/passwd"));
+        assert!(is_unsafe_name("foo/bar"));
+        assert!(is_unsafe_name("foo\\bar"));
+        assert!(is_unsafe_name(".."));
+        assert!(is_unsafe_name("."));
+        assert!(is_unsafe_name(""));
+        assert!(!is_unsafe_name("my-skill"));
+        assert!(!is_unsafe_name("skill_with_underscores"));
     }
 }

@@ -223,7 +223,7 @@ fn extract_trigger(description: &str) -> Option<String> {
 ///   skill name, 0.0 otherwise
 ///
 /// Returns the [`QueryMatch`] category and the numeric score (0.0–1.0).
-/// Strong ≥ 0.5, Weak ≥ 0.2, None < 0.2.
+/// Strong ≥ 0.4, Weak ≥ 0.15, None < 0.15.
 fn compute_query_match(query: &str, name: &str, description: &str) -> (QueryMatch, f64) {
     let query_tokens = tokenize(query);
 

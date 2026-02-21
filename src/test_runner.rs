@@ -137,10 +137,30 @@ pub fn run_test_suite(skill_dir: &Path) -> Result<TestSuiteResult> {
     })
 }
 
+/// Serializable test fixture for generating `tests.yml` via serde.
+#[derive(Debug, serde::Serialize)]
+struct GeneratedFixture {
+    /// The list of test queries.
+    queries: Vec<GeneratedQuery>,
+}
+
+/// A single test query in a generated fixture.
+#[derive(Debug, serde::Serialize)]
+struct GeneratedQuery {
+    /// The query string.
+    input: String,
+    /// Whether the query should activate the skill.
+    should_match: bool,
+    /// Optional minimum score threshold.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    min_score: Option<f64>,
+}
+
 /// Generate a starter tests.yml from skill metadata.
 ///
 /// Creates a basic fixture with a positive query derived from the skill
-/// description and a negative query.
+/// description and a negative query. Uses `serde_yaml_ng` for safe
+/// serialization of all string values.
 pub fn generate_fixture(skill_dir: &Path) -> Result<String> {
     let props = crate::read_properties(skill_dir)?;
 
@@ -153,18 +173,28 @@ pub fn generate_fixture(skill_dir: &Path) -> Result<String> {
         .trim()
         .to_lowercase();
 
+    let fixture = GeneratedFixture {
+        queries: vec![
+            GeneratedQuery {
+                input: positive,
+                should_match: true,
+                min_score: Some(0.3),
+            },
+            GeneratedQuery {
+                input: "something completely unrelated to this skill".to_string(),
+                should_match: false,
+                min_score: None,
+            },
+        ],
+    };
+
+    let yaml = serde_yaml_ng::to_string(&fixture).map_err(|e| AigentError::Parse {
+        message: format!("failed to generate tests.yml: {e}"),
+    })?;
+
     Ok(format!(
-        r#"# Test fixture for {name}
-# Run with: aigent test {name}/
-queries:
-  - input: "{positive}"
-    should_match: true
-    min_score: 0.3
-  - input: "something completely unrelated to this skill"
-    should_match: false
-"#,
+        "# Test fixture for {name}\n# Run with: aigent test {name}/\n{yaml}",
         name = props.name,
-        positive = positive,
     ))
 }
 

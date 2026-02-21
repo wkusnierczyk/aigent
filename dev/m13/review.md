@@ -718,3 +718,440 @@ All other findings are advisory or low severity.
 - [ ] Finding 7: Consider running Waves 1 and 2 in parallel
 - [ ] Finding 8: Confirm `fmt` is target-agnostic (formats all fields present)
 - [ ] Finding 10: Recalibrate test count estimate (30–35 realistic lower bound)
+
+---
+
+## Code Review (2026-02-21)
+
+Review of all code changes on `dev/m13` branch (20 commits since `main`).
+
+### Verification
+
+| Check | Result |
+|-------|--------|
+| `cargo fmt --check` | ✅ Clean |
+| `cargo clippy -- -D warnings` | ✅ Clean |
+| `cargo test` | ✅ 476 tests (342 unit + 106 CLI + 27 plugin + 1 doc-test) |
+| `cargo doc --no-deps` | ✅ Clean |
+
+**Test delta**: +60 tests (416 → 476). Consistent with plan estimate of +45–55
+after accounting for the test runner and assembler suites.
+
+### Diff Summary
+
++4500/−232 across 17 files. 3 new modules, 2 new support files.
+
+| File | Status | Lines | Issue |
+|------|--------|-------|-------|
+| `src/assembler.rs` | NEW | 366 | #83 |
+| `src/formatter.rs` | NEW | 405 | #76 |
+| `src/test_runner.rs` | NEW | 320 | #84 |
+| `src/tester.rs` | MAJOR | 490 | #79 |
+| `src/scorer.rs` | MODIFIED | 593 | #78 |
+| `src/main.rs` | MAJOR | 1427 | #76, #80, #81, #83, #84 |
+| `src/lib.rs` | MODIFIED | 92 | (all) |
+| `src/builder/mod.rs` | MODIFIED | — | #45 |
+| `src/parser.rs` | MODIFIED | — | (dedup) |
+| `src/structure.rs` | MODIFIED | — | (dedup) |
+| `tests/cli.rs` | MAJOR | +635 | #76, #80, #81, #83, #84 |
+| `tests/plugin.rs` | MODIFIED | +37 | #74 |
+| `hooks/hooks.json` | RESTRUCTURED | 16 | #74 |
+| `scripts/bump-version.sh` | NEW | 94 | #82 |
+| `skills/aigent-builder/SKILL.md` | MODIFIED | — | #76 |
+
+### Plan Conformance
+
+#### Issue-by-Issue Status
+
+| Issue | Title | Plan Status | Code Status | Notes |
+|-------|-------|-------------|-------------|-------|
+| #45 | Structured warning channel | Wave 2 Agent G-alt | ✅ Implemented | `BuildResult.warnings: Vec<String>`, 3 `eprintln!` → `warnings.push(...)` |
+| #74 | Hook variable audit | Wave 1 Agent A | ✅ Implemented | `hooks.json` restructured, stdin-based jq, no `$TOOL_INPUT` |
+| #76 | CLI naming alignment | Wave 3 Agents G/H/I | ✅ Implemented | All renames + `fmt`/`check` + aliases; see deviations below |
+| #78 | Score check labels | Wave 1 Agent B | ✅ Implemented | `fail_label: Option<String>`, `display_label()`, all 11 checks |
+| #79 | Tester weighted scoring | Wave 2 Agent D | ⚠️ Deviations | Algorithm differs from plan; see F1 |
+| #80 | Upgrade --full | Wave 2 Agent E | ✅ Implemented | Two-section output, `apply_fixes`, write error uses `?` |
+| #81 | YAML parser edge cases | Wave 2 Agent F | ✅ Implemented | `extract_frontmatter_lines()`, `detect_indent()`, `find_metadata_insert_position()` |
+| #82 | Version management | Wave 1 Agent C | ✅ Implemented | `scripts/bump-version.sh` (94 lines) |
+| #83 | Plugin assembly | Wave 4 Agent J | ✅ Implemented | `src/assembler.rs` (366 lines), `build` subcommand |
+| #84 | Fixture-based testing | Wave 4 Agent K | ✅ Implemented | `src/test_runner.rs` (320 lines), `test` subcommand |
+| #85 | CLI renames meta-issue | Wave 3 | ✅ Covered | Tracked via #76 implementation |
+
+**11/11 issues addressed.** All M13 milestone issues have corresponding code
+changes. The scope is complete.
+
+#### Alias Conformance
+
+| Old Name | New Name | Plan: Hidden Alias | Code: Hidden Alias | Status |
+|----------|----------|-------------------|-------------------|--------|
+| `build` | `new` | `build` | `create` | ⚠️ **Deviation** — alias is `create`, not `build` |
+| `to-prompt` | `prompt` | `to-prompt` | `to-prompt` | ✅ Match |
+| `test` | `probe` | `test` | (none) | ⚠️ **Missing** — no backward-compat alias |
+| `lint` | `check` | `lint` | `lint` | ✅ Match |
+| (new) | `fmt` | `format` | `format` | ✅ Match |
+
+**Two alias deviations**:
+1. `new` has alias `create` instead of `build`. The old `build` name is now
+   the plugin assembly command, making `build` as alias for `new` impossible.
+   This is a correct design decision but a deliberate deviation from the
+   plan's literal text.
+2. `probe` has no hidden alias for `test`. The old `test` name is now the
+   fixture runner, making `test` as alias for `probe` impossible. Same logic
+   as above — correct but plan didn't account for the name collision.
+
+Both deviations are logical consequences of reusing freed names. The plan said
+"old preserved as hidden alias" but didn't anticipate that `build` and `test`
+would be assigned to new commands. No action needed.
+
+### Prior Review Finding Resolution
+
+Validation of the 10 plan-review findings from the consolidated review against
+actual code implementation:
+
+| Finding | Severity | Plan Review Finding | Code Resolution | Status |
+|---------|----------|-------------------|-----------------|--------|
+| F1 | High | `#![warn(missing_docs)]` already on main | N/A — attribute was already present, no code change needed | ✅ Confirmed |
+| F2 | Medium | `eprintln!` count is 13, not 11 | Code correctly replaces only 3 LLM fallback calls; 10 interactive calls untouched | ✅ Resolved correctly |
+| F3 | Medium | Issue #85 says `validate → check` | `validate` stays as-is in code; `check` is new command | ✅ Resolved correctly |
+| F4 | Medium | Issues #83-85 missing metadata | Not verifiable in code — GitHub metadata issue | ⚪ N/A |
+| F5 | Medium | `check` absorbing `lint` changes API | `lint` alias maps to `check` (superset); `--no-validate` restores old semantic-only behavior | ✅ Resolved |
+| F6 | Low | `build` --multi flag discrepancy | Code uses `Vec<PathBuf>` (implicit multi) — simpler than explicit `--multi` | ✅ Resolved |
+| F7 | Low | Wave dependency chain | Waves executed successfully (tests pass) | ✅ N/A |
+| F8 | Low | `fmt` key order omits `context` | `KEY_ORDER` includes `context` at position 5 | ✅ Resolved |
+| F9 | Low | Post-M13 CLI missing `read-properties` | `ReadProperties` variant unchanged in code | ✅ Confirmed |
+| F10 | Low | Test count estimate | 476 − 416 = 60 new tests (above 45–55 estimate) | ✅ Exceeded |
+
+**All 10 findings resolved or confirmed.**
+
+### Code Review Findings
+
+#### F1 (Medium): Tester scoring formula deviates from plan specification
+
+**Location**: `src/tester.rs:227-285`
+
+The plan specifies (line 923):
+```
+score = 0.5 * jaccard(query, description) + 0.3 * trigger_match + 0.2 * name_match
+```
+With thresholds: Strong ≥ 0.5, Weak ≥ 0.2, None < 0.2.
+
+The code implements:
+```
+score = 0.5 * recall(query, description) + 0.3 * trigger_match + 0.2 * name_match
+```
+With thresholds: Strong ≥ 0.4, Weak ≥ 0.15, None < 0.15.
+
+Two differences:
+1. **Recall instead of Jaccard**: The code computes `intersection / query_set_len`
+   (recall) rather than `intersection / union_len` (Jaccard). Recall is
+   arguably better for this use case — it measures "what fraction of query
+   terms appear in the description" without penalizing descriptions that
+   contain additional terms. Jaccard would penalize long descriptions.
+
+2. **Lower thresholds**: Strong moved from 0.5 to 0.4, Weak from 0.2 to 0.15.
+   This makes matching more permissive. All 13 unit tests pass with these
+   thresholds, and the fixture-based CLI tests also pass, suggesting the
+   thresholds are calibrated.
+
+**Assessment**: The deviations are improvements over the plan specification.
+Recall is more appropriate than Jaccard for asymmetric matching (short query
+against long description). The lower thresholds compensate for recall's
+higher base values compared to Jaccard. The plan should be updated to reflect
+the actual implementation, or a design note should be added.
+
+**Severity**: Medium (specification drift, but functionally correct).
+
+#### F2 (Medium): `Probe` JSON output omits `score` field
+
+**Location**: `src/main.rs:724-735`
+
+`TestResult` now includes `pub score: f64` (the weighted match score), and
+the text formatter shows it (`score: {:.2}`). But the JSON output for the
+`probe` command does not include the `score` field:
+
+```rust
+let json = serde_json::json!({
+    "name": result.name,
+    "query": result.query,
+    "description": result.description,
+    "activation": format!("{:?}", result.query_match),
+    "estimated_tokens": result.estimated_tokens,
+    "validation_errors": ...,
+    "validation_warnings": ...,
+    "structure_issues": ...,
+});
+```
+
+The `score` field is available as `result.score` but not serialized. API
+consumers using `--format json` can see the activation category but not the
+numeric score. This reduces the utility of the JSON output for programmatic
+analysis (e.g., threshold tuning, test fixture calibration).
+
+**Recommendation**: Add `"score": result.score` to the JSON object.
+
+#### F3 (Medium): `assembler.rs` uses `eprintln!` for warnings — same pattern #45 fixed
+
+**Location**: `src/assembler.rs:69,73,120`
+
+Issue #45 explicitly replaced `eprintln!` warnings in `builder/mod.rs` with
+`warnings.push(...)` on `BuildResult`. The new `assembler.rs` introduces 3
+new `eprintln!` calls for the same purpose (skipping invalid skills, missing
+SKILL.md, validation diagnostics):
+
+```rust
+eprintln!("warning: skipping {}: {e}", dir.display());  // line 69
+eprintln!("warning: no SKILL.md in {}", dir.display());  // line 73
+eprintln!("{name}: {d}");  // line 120
+```
+
+These calls bypass the structured warning pattern that #45 established.
+Library consumers of `assemble_plugin()` cannot capture or suppress these
+warnings — they go directly to stderr. `AssembleResult` has no `warnings`
+field.
+
+**Recommendation**: Add `warnings: Vec<String>` to `AssembleResult` (matching
+`BuildResult` pattern) and replace the 3 `eprintln!` calls with structured
+warnings. The CLI layer then prints them to stderr.
+
+#### F4 (Medium): `generate_plugin_json()` uses string formatting — potential JSON injection
+
+**Location**: `src/assembler.rs:190-209`
+
+```rust
+fn generate_plugin_json(name: &str, skills: &[(String, PathBuf)]) -> String {
+    format!(r#"{{"name": "{name}", ...}}"#, name = name, ...)
+}
+```
+
+The `name` parameter is interpolated directly into JSON via `format!()` with
+no escaping. If a plugin name or skill name contains double quotes, backslashes,
+or control characters, the generated `plugin.json` would be malformed JSON.
+
+Currently, skill names are validated (lowercase + hyphens only via parser), so
+this is unlikely to trigger. But the plugin name can be overridden with
+`--name <arbitrary>`, which bypasses validation. For example:
+```
+aigent build skill/ --name 'my "plugin'
+```
+would produce invalid JSON.
+
+**Recommendation**: Use `serde_json::to_string_pretty()` to generate
+`plugin.json` instead of string formatting. Define a `PluginManifest` struct
+with `#[derive(Serialize)]`. This is ~5 lines of code change and eliminates
+the entire class of injection issues.
+
+#### F5 (Low): `validate` command lost `--lint` flag without deprecation
+
+**Location**: `src/main.rs` diff, lines ~89-92 (removed)
+
+The `Validate` variant previously had a `--lint` flag. The code removes it
+entirely (no deprecation period, no hidden alias). Users who relied on
+`aigent validate --lint` will get an error. The migration path is
+`aigent check`, which runs validate + lint by default.
+
+The plan's intent was clear (absorb lint into check), but removing the flag
+from validate without any deprecation notice is a breaking change. Pre-M13
+users may have `--lint` in scripts.
+
+**Assessment**: For pre-1.0 software this is acceptable, but `CHANGES.md`
+should document it clearly.
+
+#### F6 (Low): `upgrade --full` output doesn't clearly separate sections
+
+**Location**: `src/main.rs:1267-1306`
+
+The plan review Finding 5 asked for two-section output separating validate
+fixes from upgrade suggestions. The implementation prefixes validate/lint
+items with `[full]`:
+
+```rust
+suggestions.push(format!("[full] Applied {fix_count} validation/lint fix(es)"));
+suggestions.push(format!("[full] error: {d}"));
+suggestions.push(format!("[full] warning: {d}"));
+```
+
+This is a reasonable compromise — the `[full]` prefix distinguishes the
+source, and all items share the same `suggestions` Vec. But it's not the
+two-section visual layout the plan specified:
+
+```
+Validation fixes applied (--full):
+  ✓ Fixed name casing: MySkill → my-skill
+
+Upgrade suggestions:
+  ⚠ Missing 'compatibility' field
+```
+
+**Assessment**: Functional but not visually separated. The current approach
+is simpler to implement and test. Acceptable for M13; visual improvement
+could follow.
+
+#### F7 (Low): `formatter.rs` KEY_ORDER doesn't include `argument-hint`
+
+**Location**: `src/formatter.rs:24-33`
+
+The `KEY_ORDER` constant lists 8 known keys. The `argument-hint` key (a
+Claude Code extension) is not included. When present, `argument-hint` will
+be sorted alphabetically among unknown keys, placing it before `compatibility`
+instead of after `allowed-tools` where it logically belongs.
+
+The formatter is target-agnostic by design (formats whatever fields exist),
+so this is by-design behavior. But `argument-hint` is listed in
+`CLAUDE_CODE_KEYS` in `parser.rs` and used in `builder/template.rs`. It's a
+known key that the formatter doesn't know about.
+
+**Recommendation**: Either add `argument-hint` to `KEY_ORDER` (after
+`allowed-tools`) or document the intentional omission with a comment.
+
+#### F8 (Low): `copy_skill_files` skips `tests.yml` during plugin assembly
+
+**Location**: `src/assembler.rs:146-158`
+
+The `copy_skill_files()` function copies all non-SKILL.md sibling files from
+a skill directory to the assembled plugin. This includes `tests.yml` if
+present, which is a development artifact (test fixtures) not a distributable
+asset. Including test fixtures in the assembled plugin increases its size
+without benefit.
+
+```rust
+if name_str == "SKILL.md" || name_str == "skill.md"
+    || name_str.starts_with('.') || name_str == "target" {
+    continue;
+}
+```
+
+The skip list filters SKILL.md, hidden files, and `target/` but not
+`tests.yml`.
+
+**Assessment**: Minor — test fixtures in a plugin don't cause errors, just
+add unnecessary files. Consider adding `tests.yml` to the skip list.
+
+#### F9 (Low): `detect_indent` returns first-found indentation, not most-common
+
+**Location**: `src/main.rs:1202-1210`
+
+The `detect_indent()` function returns the indentation of the first indented
+line it finds. If a frontmatter has mixed indentation (e.g., 2-space for most
+keys but 4-space for one), it will use whatever comes first rather than the
+dominant pattern. This is a fragile heuristic.
+
+In practice, YAML files almost always use consistent indentation, so this is
+unlikely to cause issues. But the function's doc comment says "detects the
+indentation style used" which implies reliability.
+
+**Assessment**: Acceptable for M13. The heuristic covers the common case.
+
+#### F10 (Low): `test` exit code doesn't distinguish fixture errors from test failures
+
+**Location**: `src/main.rs:849-851`
+
+The plan specified exit codes: 0 = all pass, 1 = failure, 2 = fixture error.
+The code uses exit 1 for both:
+
+```rust
+if total_failed > 0 || any_error {
+    std::process::exit(1);
+}
+```
+
+CI scripts can't distinguish between "tests ran and some failed" (actionable)
+vs. "tests.yml couldn't be parsed" (infrastructure error). Both get exit 1.
+
+**Assessment**: Minor deviation from plan. Exit code 2 for fixture errors
+would improve CI integration but isn't critical for M13.
+
+### Observations
+
+1. **Code quality is consistently high.** All new modules follow project
+   conventions: `///` doc comments on public items, `#[must_use]` where
+   appropriate, `Result<T>` propagation with `?`, no `unwrap()` in library
+   code. Clippy and doc generation pass cleanly.
+
+2. **The `formatter.rs` module is well-designed.** The `YamlBlock` enum for
+   parsing YAML frontmatter is a clean abstraction. The separation between
+   `format_skill()` (filesystem-aware) and `format_content()` (pure string
+   transform) follows the same pattern as `validate_structure()` vs.
+   `validate()`. The idempotency test ensures reformatting stability.
+
+3. **The YAML manipulation helpers in `main.rs` are solid.** The
+   `extract_frontmatter_lines()`, `detect_indent()`, and
+   `find_metadata_insert_position()` trio handles the #81 edge cases well:
+   comment-aware scanning, indentation detection, metadata block locating.
+   The CLI tests cover comments, partial metadata, 4-space indentation,
+   and no-metadata-block scenarios.
+
+4. **The `test_runner.rs` module integrates cleanly with tester.** It reuses
+   `tester::test_skill()` for the actual matching, adding only the fixture
+   parsing and result comparison layer. The `--generate` flag is a good DX
+   touch that creates starter fixtures from skill metadata.
+
+5. **The CLI restructuring is comprehensive.** 106 CLI tests cover all the
+   new commands, aliases, and edge cases. The test organization uses clear
+   section headers (`// ── M13: YAML parser edge cases (#81) ──────`).
+
+6. **The `read_body()` deduplication is clean.** Three copies reduced to
+   one `pub fn read_body()` in `parser.rs`, with `structure.rs` and
+   `scorer.rs` both calling `crate::parser::read_body()`. This was the
+   clearest cleanup target from M12 review.
+
+7. **The `builder/mod.rs` structured warnings are minimal and correct.**
+   Only the 3 LLM fallback `eprintln!` calls were replaced with
+   `warnings.push(...)`. The 10 interactive output calls were correctly
+   left untouched. The CLI prints warnings with the `warning:` prefix
+   (line 648).
+
+8. **The `hooks.json` restructuring follows the Claude Code plugin schema.**
+   The new format (`{"description": ..., "hooks": {"PostToolUse": [...]}}`)
+   is the correct schema. The stdin-based `jq` approach (no `$TOOL_INPUT`
+   env variable) is more robust.
+
+9. **The `bump-version.sh` script is well-structured.** It validates semver
+   format, updates 3 files atomically, regenerates `Cargo.lock`, and is
+   idempotent. Uses `sed -i ''` for macOS compatibility.
+
+10. **The scorer's `read_body()` now uses the shared parser function.**
+    Line 110 of `scorer.rs` calls `crate::parser::read_body(dir)` instead
+    of a local copy. The `fail_label` additions are backward-compatible
+    (JSON serialization unchanged via `skip_serializing_if`).
+
+### Verdict
+
+**Approved.** The M13 code changes are well-implemented, comprehensive, and
+follow project conventions. All 11 milestone issues have corresponding code
+changes. Verification passes (476 tests, clean clippy/fmt/doc).
+
+**Should fix before merge**:
+
+- F2 (Medium): Add `score` field to `probe` JSON output. One-line change.
+- F4 (Medium): Replace `format!()` with `serde_json` in `generate_plugin_json()`.
+  Prevents potential JSON injection via `--name`.
+
+**Should consider before merge**:
+
+- F3 (Medium): Add `warnings` to `AssembleResult` (matching `BuildResult`
+  pattern from #45). The new `assembler.rs` reintroduces the same
+  `eprintln!` pattern that #45 specifically fixed.
+- F1 (Medium): Update plan to reflect actual scoring formula (recall, not
+  Jaccard; lower thresholds). Or add a design note explaining the deviation.
+
+**Advisory (post-merge)**:
+
+- F5: Document `--lint` removal in CHANGES.md
+- F6: Visual separation for `--full` output
+- F7: Add `argument-hint` to formatter KEY_ORDER
+- F8: Skip `tests.yml` in plugin assembly
+- F9: Improve indent detection heuristic
+- F10: Differentiated exit codes for test runner
+
+### Summary Statistics
+
+| Metric | Value |
+|--------|-------|
+| Issues addressed | 11/11 |
+| New modules | 3 (`assembler.rs`, `formatter.rs`, `test_runner.rs`) |
+| Lines added | ~4500 |
+| Lines removed | ~232 |
+| Tests added | +60 (416 → 476) |
+| Findings | 10 (0 high, 4 medium, 6 low) |
+| Plan deviations | 2 (alias naming, scoring formula) |
+| Verification | All 4 checks pass |
