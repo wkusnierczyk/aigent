@@ -43,6 +43,8 @@ pub mod linter;
 pub mod models;
 /// SKILL.md frontmatter parser.
 pub mod parser;
+/// Plugin ecosystem validation: manifest, hooks, agents, commands.
+pub mod plugin;
 /// Multi-format prompt generation for LLM injection.
 pub mod prompt;
 /// Quality scoring for skill best-practices compliance.
@@ -69,8 +71,10 @@ pub use linter::lint;
 #[doc(inline)]
 pub use models::SkillProperties;
 pub use parser::{
-    find_skill_md, parse_frontmatter, read_body, read_properties, CLAUDE_CODE_KEYS, KNOWN_KEYS,
+    find_skill_md, parse_frontmatter, parse_optional_frontmatter, read_body, read_properties,
+    CLAUDE_CODE_KEYS, KNOWN_KEYS,
 };
+pub use plugin::{validate_manifest, PluginManifest};
 pub use prompt::{
     collect_skills, collect_skills_verbose, estimate_tokens, format_budget, format_entries,
     to_prompt, to_prompt_format, PromptFormat, SkillEntry,

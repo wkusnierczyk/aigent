@@ -2142,3 +2142,123 @@ fn probe_multiple_dirs_ranked_by_score() {
     assert_eq!(arr[0]["name"], "skill-b");
     assert_eq!(arr[1]["name"], "skill-a");
 }
+
+// ── validate-plugin ──────────────────────────────────────────────
+
+/// Helper: write a plugin.json in a temp dir and return (dir, path).
+fn make_plugin_dir(content: &str) -> (tempfile::TempDir, PathBuf) {
+    let dir = tempdir().unwrap();
+    let path = dir.path().to_path_buf();
+    fs::write(path.join("plugin.json"), content).unwrap();
+    (dir, path)
+}
+
+#[test]
+fn validate_plugin_valid_manifest() {
+    let (_dir, path) = make_plugin_dir(
+        r#"{ "name": "my-plugin", "description": "A test plugin", "version": "1.0.0", "author": "Test", "homepage": "https://example.com", "license": "MIT" }"#,
+    );
+    aigent()
+        .args(["validate-plugin", path.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Plugin validation passed"));
+}
+
+#[test]
+fn validate_plugin_missing_plugin_json() {
+    let dir = tempdir().unwrap();
+    aigent()
+        .args(["validate-plugin", dir.path().to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot read plugin.json"));
+}
+
+#[test]
+fn validate_plugin_invalid_json() {
+    let (_dir, path) = make_plugin_dir("{ not json }");
+    aigent()
+        .args(["validate-plugin", path.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid JSON syntax"));
+}
+
+#[test]
+fn validate_plugin_missing_name() {
+    let (_dir, path) = make_plugin_dir(r#"{ "description": "test" }"#);
+    aigent()
+        .args(["validate-plugin", path.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("missing required field `name`"));
+}
+
+#[test]
+fn validate_plugin_invalid_name() {
+    let (_dir, path) = make_plugin_dir(r#"{ "name": "My Plugin" }"#);
+    aigent()
+        .args(["validate-plugin", path.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not valid kebab-case"));
+}
+
+#[test]
+fn validate_plugin_bad_version() {
+    let (_dir, path) = make_plugin_dir(r#"{ "name": "test", "version": "1.0" }"#);
+    aigent()
+        .args(["validate-plugin", path.to_str().unwrap()])
+        .assert()
+        .success() // P004 is a warning, not an error
+        .stderr(predicate::str::contains("not valid semver"));
+}
+
+#[test]
+fn validate_plugin_json_format() {
+    let (_dir, path) = make_plugin_dir(r#"{ "name": "test" }"#);
+    let output = aigent()
+        .args([
+            "validate-plugin",
+            path.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let arr = json.as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+    let diags = arr[0]["diagnostics"].as_array().unwrap();
+    // Should have at least P005 (missing description) and P010s (missing recommended fields)
+    assert!(diags.iter().any(|d| d["code"] == "P005"));
+}
+
+#[test]
+fn validate_plugin_defaults_to_current_dir() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("plugin.json"),
+        r#"{ "name": "my-plugin", "description": "test", "author": "x", "homepage": "x", "license": "MIT" }"#,
+    )
+    .unwrap();
+    aigent()
+        .arg("validate-plugin")
+        .current_dir(dir.path())
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Plugin validation passed"));
+}
+
+#[test]
+fn validate_plugin_credential_detection() {
+    let (_dir, path) =
+        make_plugin_dir(r#"{ "name": "test", "config": { "value": "api_key: 'sk-1234abcd'" } }"#);
+    aigent()
+        .args(["validate-plugin", path.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("credential"));
+}

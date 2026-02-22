@@ -185,6 +185,109 @@ pub const C002: &str = "C002";
 /// Total token budget exceeded.
 pub const C003: &str = "C003";
 
+// ── Plugin manifest codes (P001–P010) ──────────────────────────────────
+
+/// JSON syntax error in plugin.json.
+pub const P001: &str = "P001";
+/// `name` field missing in plugin.json.
+pub const P002: &str = "P002";
+/// `name` not kebab-case or contains spaces.
+pub const P003: &str = "P003";
+/// `version` not semver format (x.y.z).
+pub const P004: &str = "P004";
+/// `description` empty or missing.
+pub const P005: &str = "P005";
+/// Custom path uses absolute path (must start with `./`).
+pub const P006: &str = "P006";
+/// Declared component path does not exist on filesystem.
+pub const P007: &str = "P007";
+/// Hardcoded credential/token detected in string values.
+pub const P008: &str = "P008";
+/// MCP server URL uses HTTP/WS instead of HTTPS/WSS.
+pub const P009: &str = "P009";
+/// Missing recommended field (author, homepage, license).
+pub const P010: &str = "P010";
+
+// ── Hook validation codes (H001–H011) ──────────────────────────────────
+
+/// Invalid JSON syntax in hooks file.
+pub const H001: &str = "H001";
+/// Invalid hooks structure (not an object of event arrays).
+pub const H002: &str = "H002";
+/// Unknown event name.
+pub const H003: &str = "H003";
+/// Hook entry missing `hooks` array.
+pub const H004: &str = "H004";
+/// Hook missing `type` field.
+pub const H005: &str = "H005";
+/// Unknown hook type (not `command` or `prompt`).
+pub const H006: &str = "H006";
+/// Command hook missing `command` field.
+pub const H007: &str = "H007";
+/// Prompt hook missing `prompt` field.
+pub const H008: &str = "H008";
+/// Timeout outside recommended range (5–600 seconds).
+pub const H009: &str = "H009";
+/// Hardcoded absolute path in hook command.
+pub const H010: &str = "H010";
+/// Prompt hook on suboptimal event.
+pub const H011: &str = "H011";
+
+// ── Agent file validation codes (A001–A010) ────────────────────────────
+
+/// Agent frontmatter missing (no `---` delimiters).
+pub const A001: &str = "A001";
+/// Required agent field missing (name, description, model, color).
+pub const A002: &str = "A002";
+/// Agent name not kebab-case.
+pub const A003: &str = "A003";
+/// Agent name is generic.
+pub const A004: &str = "A004";
+/// Agent name length outside 3–50 chars.
+pub const A005: &str = "A005";
+/// Agent description length outside 10–5000 chars.
+pub const A006: &str = "A006";
+/// Agent model not one of: inherit, sonnet, opus, haiku.
+pub const A007: &str = "A007";
+/// Agent color not one of: blue, cyan, green, yellow, magenta, red.
+pub const A008: &str = "A008";
+/// Agent system prompt (body) missing or too short (<20 chars).
+pub const A009: &str = "A009";
+/// Agent system prompt too long (>10k chars).
+pub const A010: &str = "A010";
+
+// ── Command file validation codes (K001–K007) ──────────────────────────
+
+/// Command frontmatter syntax error (if `---` present but invalid YAML).
+pub const K001: &str = "K001";
+/// Command description exceeds 60 chars.
+pub const K002: &str = "K002";
+/// Command model not one of: sonnet, opus, haiku.
+pub const K003: &str = "K003";
+/// Command description does not start with a verb.
+pub const K004: &str = "K004";
+/// Command body is empty.
+pub const K005: &str = "K005";
+/// Command allowed-tools invalid format.
+pub const K006: &str = "K006";
+/// Missing command description (recommended for discoverability).
+pub const K007: &str = "K007";
+
+// ── Cross-component consistency codes (X001–X006) ──────────────────────
+
+/// Component directory is empty (no valid files found).
+pub const X001: &str = "X001";
+/// Command hook references script that doesn't exist.
+pub const X002: &str = "X002";
+/// Orphaned file in component directory (not referenced).
+pub const X003: &str = "X003";
+/// Naming inconsistency across components.
+pub const X004: &str = "X004";
+/// Total token budget across all skills exceeds threshold.
+pub const X005: &str = "X005";
+/// Duplicate component names across types.
+pub const X006: &str = "X006";
+
 /// Validation target profile for controlling which fields are considered known.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ValidationTarget {
@@ -307,7 +410,10 @@ mod tests {
         let codes = [
             E000, E001, E002, E003, E004, E005, E006, E007, E008, E009, E010, E011, E012, E013,
             E014, E015, E016, E017, E018, W001, W002, S001, S002, S003, S004, S005, S006, C001,
-            C002, C003,
+            C002, C003, P001, P002, P003, P004, P005, P006, P007, P008, P009, P010, H001, H002,
+            H003, H004, H005, H006, H007, H008, H009, H010, H011, A001, A002, A003, A004, A005,
+            A006, A007, A008, A009, A010, K001, K002, K003, K004, K005, K006, K007, X001, X002,
+            X003, X004, X005, X006,
         ];
         let mut seen = std::collections::HashSet::new();
         for code in &codes {

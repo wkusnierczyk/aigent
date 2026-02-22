@@ -260,6 +260,15 @@ enum Commands {
         #[arg(long)]
         recursive: bool,
     },
+    /// Validate a Claude Code plugin directory
+    ValidatePlugin {
+        /// Path to plugin root directory [default: .]
+        #[arg(name = "plugin-dir", default_value = ".")]
+        plugin_dir: PathBuf,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
     /// Initialize a skill directory with a template SKILL.md
     Init {
         /// Target directory
@@ -1018,6 +1027,35 @@ fn main() {
             }
 
             if any_error || (check && any_changed) {
+                std::process::exit(1);
+            }
+        }
+        Some(Commands::ValidatePlugin { plugin_dir, format }) => {
+            let manifest_path = plugin_dir.join("plugin.json");
+            let diags = aigent::validate_manifest(&manifest_path);
+
+            let has_errors = diags.iter().any(|d| d.is_error());
+
+            match format {
+                Format::Text => {
+                    for d in &diags {
+                        eprintln!("{d}");
+                    }
+                    if diags.is_empty() {
+                        eprintln!("Plugin validation passed.");
+                    }
+                }
+                Format::Json => {
+                    let entries = vec![serde_json::json!({
+                        "path": manifest_path.display().to_string(),
+                        "diagnostics": diags,
+                    })];
+                    let json = serde_json::to_string_pretty(&entries).unwrap();
+                    println!("{json}");
+                }
+            }
+
+            if has_errors {
                 std::process::exit(1);
             }
         }

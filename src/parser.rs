@@ -138,6 +138,20 @@ pub fn parse_frontmatter(content: &str) -> Result<(HashMap<String, Value>, Strin
     Ok((map, body))
 }
 
+/// Parse optional YAML frontmatter from markdown content.
+///
+/// If the content starts with `---`, delegates to [`parse_frontmatter`].
+/// Otherwise, returns an empty metadata map and the full content as body.
+///
+/// Used by command file validation where frontmatter is optional.
+pub fn parse_optional_frontmatter(content: &str) -> Result<(HashMap<String, Value>, String)> {
+    if content.trim_start().starts_with("---") {
+        parse_frontmatter(content)
+    } else {
+        Ok((HashMap::new(), content.to_string()))
+    }
+}
+
 /// Known frontmatter keys that map to typed `SkillProperties` fields.
 ///
 /// Used by both the parser (to extract known fields) and the validator
