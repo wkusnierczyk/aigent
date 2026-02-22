@@ -1332,7 +1332,7 @@ This single command:
 2. Generates a changelog from merged PRs since the previous tag (via `gh`)
 3. Writes the changelog to `CHANGES.md`
 4. Updates version across all files (`Cargo.toml`, `plugin.json`, `README.md`, `Cargo.lock`)
-5. Commits, tags, and pushes — triggering the CI release workflow
+5. Commits, tags, and pushes — triggering the release workflow
 
 Use `--dry-run` to preview without executing:
 
