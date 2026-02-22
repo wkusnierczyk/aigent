@@ -1323,7 +1323,7 @@ time via `env!("CARGO_PKG_VERSION")`.
 
 ### Milestones
 
-**Status:** Implementation complete (M1–M14). In review.
+**Status:** Implementation complete (M1–M15).
 
 Project tracked at
 [github.com/users/wkusnierczyk/projects/39](https://github.com/users/wkusnierczyk/projects/39).
@@ -1344,23 +1344,15 @@ Project tracked at
 | M12 | Ecosystem and Workflow | ✅ |
 | M13 | Enhancements | ✅ |
 | M14 | SRE Review | ✅ |
-| M15 | Plugin Ecosystem Validation | 🔲 |
+| M15 | Plugin Ecosystem Validation | ✅ |
 
 ### Roadmap
 
-**M15: Plugin Ecosystem Validation** — extend `aigent`'s deterministic
-validation from `SKILL.md` to the full Claude Code plugin ecosystem.
-Complements [`plugin-dev`](dev/plugin-dev.md) by mechanizing the rules it
-teaches through prose and LLM-driven agents:
+See [open issues](https://github.com/wkusnierczyk/aigent/issues) for planned work.
 
-- Hook validation (`hooks.json`) — replaces `plugin-dev`'s `validate-hook-schema.sh`
-- Agent file validation (`.md` frontmatter) — replaces `plugin-dev`'s `validate-agent.sh`
-- Plugin manifest validation (`plugin.json`) — mechanizes `plugin-validator` agent checks
-- Command file validation (`.md` frontmatter) — first deterministic validator for commands
-- Cross-component consistency checks — unique to `aigent`, no `plugin-dev` equivalent
-
-5 issues ([#97](https://github.com/wkusnierczyk/aigent/issues/97)–[#101](https://github.com/wkusnierczyk/aigent/issues/101)).
-See [dev/plugin-dev.md](dev/plugin-dev.md) for the full analysis.
+Notable: [#131](https://github.com/wkusnierczyk/aigent/issues/131) — modular CLI
+redesign with subcommand groups (`aigent skill ...`, `aigent plugin ...`) for
+when additional AI agent domains are supported.
 
 ## CI/CD and release workflows
 
