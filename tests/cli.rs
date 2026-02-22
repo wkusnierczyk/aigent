@@ -1668,13 +1668,44 @@ fn fmt_check_unformatted_exits_nonzero() {
         .args(["fmt", dir.to_str().unwrap(), "--check"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Would reformat"));
+        .stderr(predicate::str::contains("Would reformat"))
+        .stderr(predicate::str::contains("---"))
+        .stderr(predicate::str::contains("+++"))
+        .stderr(predicate::str::contains("@@"));
     // File should NOT have been modified.
     let content = fs::read_to_string(dir.join("SKILL.md")).unwrap();
     assert!(
         content.starts_with("---\nmetadata:"),
         "file should be unchanged in --check mode"
     );
+}
+
+#[test]
+fn fmt_check_shows_diff_content() {
+    let (_parent, dir) = make_skill_dir(
+        "diff-skill",
+        "---\nallowed-tools: Bash\nname: diff-skill\ndescription: Does things\n---\nBody.\n",
+    );
+    aigent()
+        .args(["fmt", dir.to_str().unwrap(), "--check"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("-allowed-tools"))
+        .stderr(predicate::str::contains("+allowed-tools"));
+}
+
+#[test]
+fn fmt_check_formatted_no_diff() {
+    let (_parent, dir) = make_skill_dir(
+        "nodiff-skill",
+        "---\nname: nodiff-skill\ndescription: Does things\n---\nBody.\n",
+    );
+    aigent()
+        .args(["fmt", dir.to_str().unwrap(), "--check"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Would reformat").not())
+        .stderr(predicate::str::contains("@@").not());
 }
 
 #[test]

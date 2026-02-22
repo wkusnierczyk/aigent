@@ -15,6 +15,23 @@ pub struct FormatResult {
     pub changed: bool,
     /// The formatted content (full SKILL.md file).
     pub content: String,
+    /// The original content before formatting.
+    pub original: String,
+}
+
+/// Generate a unified diff between the original and formatted content.
+///
+/// Returns an empty string if the content has not changed.
+/// The `path` argument is used as the filename in diff headers.
+#[must_use]
+pub fn diff_skill(result: &FormatResult, path: &str) -> String {
+    if !result.changed {
+        return String::new();
+    }
+    let diff = similar::TextDiff::from_lines(&result.original, &result.content);
+    diff.unified_diff()
+        .header(path, &format!("{path} (formatted)"))
+        .to_string()
 }
 
 /// Canonical key ordering for YAML frontmatter.
@@ -51,7 +68,11 @@ pub fn format_skill(dir: &Path) -> Result<FormatResult> {
     let content = format_content(&original)?;
     let changed = content != original;
 
-    Ok(FormatResult { changed, content })
+    Ok(FormatResult {
+        changed,
+        content,
+        original,
+    })
 }
 
 /// Format SKILL.md content (for testing without filesystem access).
@@ -587,6 +608,54 @@ mod tests {
         assert_eq!(
             first, second,
             "formatting with comments should be idempotent"
+        );
+    }
+
+    // ── diff_skill tests ────────────────────────────────────────────
+
+    #[test]
+    fn diff_skill_no_changes_returns_empty() {
+        let result = FormatResult {
+            changed: false,
+            content: "same".into(),
+            original: "same".into(),
+        };
+        assert!(diff_skill(&result, "test/SKILL.md").is_empty());
+    }
+
+    #[test]
+    fn diff_skill_shows_unified_diff() {
+        let original =
+            "---\nallowed-tools: Bash\nname: my-skill\ndescription: Does things\n---\nBody.\n";
+        let content = format_content(original).unwrap();
+        let result = FormatResult {
+            changed: true,
+            content,
+            original: original.into(),
+        };
+        let diff = diff_skill(&result, "my-skill/SKILL.md");
+        assert!(
+            diff.contains("--- my-skill/SKILL.md"),
+            "should have --- header"
+        );
+        assert!(
+            diff.contains("+++ my-skill/SKILL.md (formatted)"),
+            "should have +++ header"
+        );
+        assert!(diff.contains("@@"), "should have hunk markers");
+        assert!(diff.contains("-allowed-tools"), "should show removed line");
+        assert!(diff.contains("+allowed-tools"), "should show added line");
+    }
+
+    #[test]
+    fn diff_skill_crlf_input_no_spurious_changes() {
+        let lf = "---\nname: my-skill\ndescription: A skill\n---\nBody.\n";
+        let crlf = "---\r\nname: my-skill\r\ndescription: A skill\r\n---\r\nBody.\r\n";
+        let lf_result = format_content(lf).unwrap();
+        let crlf_result = format_content(crlf).unwrap();
+        assert_eq!(
+            lf_result, crlf_result,
+            "CRLF and LF should produce identical formatted output"
         );
     }
 }

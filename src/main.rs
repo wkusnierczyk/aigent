@@ -959,6 +959,8 @@ fn main() {
                             any_changed = true;
                             if check {
                                 eprintln!("Would reformat: {}", dir.display());
+                                let diff = aigent::diff_skill(&result, &dir.display().to_string());
+                                eprint!("{diff}");
                             } else {
                                 let path = aigent::find_skill_md(dir).unwrap();
                                 std::fs::write(&path, &result.content).unwrap_or_else(|e| {
