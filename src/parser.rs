@@ -145,7 +145,7 @@ pub fn parse_frontmatter(content: &str) -> Result<(HashMap<String, Value>, Strin
 ///
 /// Used by command file validation where frontmatter is optional.
 pub fn parse_optional_frontmatter(content: &str) -> Result<(HashMap<String, Value>, String)> {
-    if content.trim_start().starts_with("---") {
+    if content.starts_with("---") {
         parse_frontmatter(content)
     } else {
         Ok((HashMap::new(), content.to_string()))

@@ -27,14 +27,10 @@ pub fn validate_cross_component(root: &Path) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     let mut all_components: Vec<Component> = Vec::new();
 
-    // Check each component directory type
-    let component_dirs: &[(&str, &str, &str)] = &[
-        ("agents", "agent", "md"),
-        ("commands", "command", "md"),
-        ("skills", "skill", "md"),
-    ];
+    // Check flat component directories (agents, commands contain .md files directly)
+    let flat_dirs: &[(&str, &str)] = &[("agents", "agent"), ("commands", "command")];
 
-    for &(dir_name, kind, ext) in component_dirs {
+    for &(dir_name, kind) in flat_dirs {
         let dir = root.join(dir_name);
         if !dir.is_dir() {
             continue;
@@ -50,7 +46,7 @@ pub fn validate_cross_component(root: &Path) -> Vec<Diagnostic> {
             .iter()
             .filter(|e| {
                 let p = e.path();
-                p.is_file() && p.extension().is_some_and(|e| e == ext)
+                p.is_file() && p.extension().is_some_and(|e| e == "md")
             })
             .collect();
 
@@ -58,7 +54,7 @@ pub fn validate_cross_component(root: &Path) -> Vec<Diagnostic> {
             diags.push(Diagnostic::new(
                 Severity::Info,
                 X001,
-                format!("`{dir_name}/` directory exists but contains no .{ext} files"),
+                format!("`{dir_name}/` directory exists but contains no .md files"),
             ));
         }
 
@@ -72,7 +68,7 @@ pub fn validate_cross_component(root: &Path) -> Vec<Diagnostic> {
             all_components.push(Component { name: stem, kind });
         }
 
-        // X003: Orphaned files (not .md/.json and not in ignore list)
+        // X003: Orphaned files (not .md and not in ignore list)
         for entry in &entries {
             let path = entry.path();
             let file_name = path
@@ -84,17 +80,55 @@ pub fn validate_cross_component(root: &Path) -> Vec<Diagnostic> {
                 continue;
             }
 
-            if path.is_file() && path.extension().is_none_or(|e| e != ext) {
+            if path.is_file() && path.extension().is_none_or(|e| e != "md") {
                 diags.push(
                     Diagnostic::new(
                         Severity::Warning,
                         X003,
                         format!("orphaned file in `{dir_name}/`: \"{file_name}\""),
                     )
-                    .with_suggestion(format!(
-                        "Remove it or convert to .{ext} if it's a {kind} file"
-                    )),
+                    .with_suggestion(format!("Remove it or convert to .md if it's a {kind} file")),
                 );
+            }
+        }
+    }
+
+    // Check skills directory (skills are subdirectories containing SKILL.md)
+    let skills_dir = root.join("skills");
+    if skills_dir.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&skills_dir) {
+            let skill_subdirs: Vec<_> = entries.flatten().filter(|e| e.path().is_dir()).collect();
+
+            let valid_skills: Vec<_> = skill_subdirs
+                .iter()
+                .filter(|e| e.path().join("SKILL.md").exists())
+                .collect();
+
+            if valid_skills.is_empty() && !skill_subdirs.is_empty() {
+                diags.push(Diagnostic::new(
+                    Severity::Info,
+                    X001,
+                    "`skills/` directory has subdirectories but none contain SKILL.md".to_string(),
+                ));
+            } else if skill_subdirs.is_empty() {
+                diags.push(Diagnostic::new(
+                    Severity::Info,
+                    X001,
+                    "`skills/` directory exists but contains no skill subdirectories".to_string(),
+                ));
+            }
+
+            // Collect skill names from directory names
+            for entry in &valid_skills {
+                let name = entry
+                    .path()
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                all_components.push(Component {
+                    name,
+                    kind: "skill",
+                });
             }
         }
     }
@@ -461,5 +495,54 @@ mod tests {
         .unwrap();
         let diags = validate_cross_component(&root);
         assert!(!diags.iter().any(|d| d.code == X002));
+    }
+
+    #[test]
+    fn skills_as_subdirs_discovered() {
+        let (_dir, root) = make_plugin("test");
+        let skills = root.join("skills");
+        let skill_dir = skills.join("my-skill");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: my-skill\ndescription: Does things.\n---\nBody.\n",
+        )
+        .unwrap();
+        let diags = validate_cross_component(&root);
+        // Should NOT emit X001 for a valid skill subdirectory
+        assert!(
+            !diags.iter().any(|d| d.code == X001),
+            "unexpected X001: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn empty_skills_dir_x001() {
+        let (_dir, root) = make_plugin("test");
+        fs::create_dir(root.join("skills")).unwrap();
+        let diags = validate_cross_component(&root);
+        assert!(diags.iter().any(|d| d.code == X001));
+    }
+
+    #[test]
+    fn skill_and_agent_duplicate_x006() {
+        let (_dir, root) = make_plugin("test");
+        // Create agent "deploy"
+        let agents = root.join("agents");
+        fs::create_dir(&agents).unwrap();
+        fs::write(agents.join("deploy.md"), "---\n---\nBody.\n").unwrap();
+        // Create skill "deploy"
+        let skill_dir = root.join("skills").join("deploy");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: deploy\ndescription: Deploys things.\n---\nBody.\n",
+        )
+        .unwrap();
+        let diags = validate_cross_component(&root);
+        assert!(
+            diags.iter().any(|d| d.code == X006),
+            "expected X006 for skill/agent name collision: {diags:?}"
+        );
     }
 }

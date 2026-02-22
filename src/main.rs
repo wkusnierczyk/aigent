@@ -1102,6 +1102,22 @@ fn main() {
                 }
             }
 
+            // Validate skill directories (each subdirectory under skills/)
+            let skills_dir = plugin_dir.join("skills");
+            if skills_dir.is_dir() {
+                if let Ok(entries) = std::fs::read_dir(&skills_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.is_dir() && path.join("SKILL.md").exists() {
+                            let label =
+                                format!("skills/{}", path.file_name().unwrap().to_string_lossy());
+                            let skill_diags = aigent::validate(&path);
+                            all_diags.push((label, skill_diags));
+                        }
+                    }
+                }
+            }
+
             // Cross-component consistency checks (X-series)
             let cross_diags = aigent::validate_cross_component(&plugin_dir);
             if !cross_diags.is_empty() {

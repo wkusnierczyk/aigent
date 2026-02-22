@@ -24,17 +24,6 @@ static CREDENTIAL_RE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("credential regex")
 });
 
-/// Component path override fields in `plugin.json`.
-const PATH_OVERRIDE_FIELDS: &[&str] = &[
-    "commands",
-    "agents",
-    "skills",
-    "hooks",
-    "mcpServers",
-    "outputStyles",
-    "lspServers",
-];
-
 /// Recommended metadata fields that improve discoverability.
 const RECOMMENDED_FIELDS: &[(&str, &str)] = &[
     ("author", "Add an author field for attribution"),
@@ -108,15 +97,7 @@ impl PluginManifest {
         ];
         let mut result: Vec<(&'static str, &str)> = string_fields
             .into_iter()
-            .filter_map(|(name, val)| {
-                val.as_deref().map(|v| {
-                    let field = PATH_OVERRIDE_FIELDS
-                        .iter()
-                        .find(|f| **f == name)
-                        .unwrap_or(&name);
-                    (*field, v)
-                })
-            })
+            .filter_map(|(name, val)| val.as_deref().map(|v| (name, v)))
             .collect();
         // mcpServers can be a string (path) or object (inline config); only
         // treat it as a path override when it's a string.
@@ -242,7 +223,7 @@ pub fn validate_manifest(path: &Path) -> Vec<Diagnostic> {
     let plugin_dir = path.parent().unwrap_or(Path::new("."));
     for (field, value) in manifest.path_overrides() {
         // P006: absolute path
-        if value.starts_with('/') {
+        if Path::new(value).is_absolute() {
             diags.push(
                 Diagnostic::new(
                     Severity::Error,
@@ -269,13 +250,14 @@ pub fn validate_manifest(path: &Path) -> Vec<Diagnostic> {
     }
 
     // P008: credential scanning (scan all string values in the JSON)
-    scan_credentials(&raw, &mut diags);
+    scan_credentials(&raw, &mut diags, &mut Vec::new());
 
     // P009: insecure MCP server URLs
     if let Some(obj) = raw.get("mcpServers").and_then(|v| v.as_object()) {
         for (server_name, config) in obj {
             if let Some(url) = config.get("url").and_then(|u| u.as_str()) {
-                if url.starts_with("http://") || url.starts_with("ws://") {
+                let url_lower = url.to_ascii_lowercase();
+                if url_lower.starts_with("http://") || url_lower.starts_with("ws://") {
                     diags.push(
                         Diagnostic::new(
                             Severity::Warning,
@@ -309,15 +291,26 @@ pub fn validate_manifest(path: &Path) -> Vec<Diagnostic> {
 }
 
 /// Recursively scan all string values in a JSON tree for credential patterns.
-fn scan_credentials(value: &serde_json::Value, diags: &mut Vec<Diagnostic>) {
+///
+/// Tracks the JSON path for actionable diagnostic messages.
+fn scan_credentials(
+    value: &serde_json::Value,
+    diags: &mut Vec<Diagnostic>,
+    path: &mut Vec<String>,
+) {
     match value {
         serde_json::Value::String(s) => {
             if CREDENTIAL_RE.is_match(s) {
+                let location = if path.is_empty() {
+                    String::new()
+                } else {
+                    format!(" at `{}`", path.join(""))
+                };
                 diags.push(
                     Diagnostic::new(
                         Severity::Error,
                         P008,
-                        "possible hardcoded credential detected",
+                        format!("possible hardcoded credential detected{location}"),
                     )
                     .with_suggestion(
                         "Use environment variables or a secrets manager instead of inline credentials",
@@ -326,13 +319,22 @@ fn scan_credentials(value: &serde_json::Value, diags: &mut Vec<Diagnostic>) {
             }
         }
         serde_json::Value::Object(map) => {
-            for v in map.values() {
-                scan_credentials(v, diags);
+            for (key, v) in map {
+                let segment = if path.is_empty() {
+                    key.clone()
+                } else {
+                    format!(".{key}")
+                };
+                path.push(segment);
+                scan_credentials(v, diags, path);
+                path.pop();
             }
         }
         serde_json::Value::Array(arr) => {
-            for v in arr {
-                scan_credentials(v, diags);
+            for (idx, v) in arr.iter().enumerate() {
+                path.push(format!("[{idx}]"));
+                scan_credentials(v, diags, path);
+                path.pop();
             }
         }
         _ => {}
@@ -473,7 +475,13 @@ mod tests {
             r#"{ "name": "test", "config": { "value": "api_key: 'sk-1234abcd'" } }"#,
         );
         let diags = validate_manifest(&path);
-        assert!(diags.iter().any(|d| d.code == P008));
+        let p008 = diags.iter().find(|d| d.code == P008);
+        assert!(p008.is_some());
+        assert!(
+            p008.unwrap().message.contains("config.value"),
+            "P008 should include JSON path: {}",
+            p008.unwrap().message
+        );
     }
 
     #[test]
@@ -488,6 +496,24 @@ mod tests {
     fn insecure_mcp_url_p009() {
         let (_dir, path) = write_manifest(
             r#"{ "name": "test", "mcpServers": { "local": { "url": "http://localhost:3000" } } }"#,
+        );
+        let diags = validate_manifest(&path);
+        assert!(diags.iter().any(|d| d.code == P009));
+    }
+
+    #[test]
+    fn insecure_ws_url_p009() {
+        let (_dir, path) = write_manifest(
+            r#"{ "name": "test", "mcpServers": { "ws-server": { "url": "ws://localhost:8080" } } }"#,
+        );
+        let diags = validate_manifest(&path);
+        assert!(diags.iter().any(|d| d.code == P009));
+    }
+
+    #[test]
+    fn insecure_url_case_insensitive_p009() {
+        let (_dir, path) = write_manifest(
+            r#"{ "name": "test", "mcpServers": { "mixed": { "url": "HTTP://localhost:3000" } } }"#,
         );
         let diags = validate_manifest(&path);
         assert!(diags.iter().any(|d| d.code == P009));

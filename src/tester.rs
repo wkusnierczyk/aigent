@@ -99,7 +99,7 @@ pub fn test_skill(dir: &Path, query: &str) -> Result<TestResult> {
 pub fn format_test_result(result: &TestResult) -> String {
     let mut out = String::new();
 
-    // Aligned label width (widest label is "Tokens" at 6 chars + 1 padding).
+    // Aligned label width (widest label is "Description:" at 12 chars + 1 padding).
     const W: usize = 13;
 
     out.push_str(&format!("{:<W$} {}\n", "Skill:", result.name));

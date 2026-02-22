@@ -145,7 +145,7 @@ pub fn validate_command(path: &Path) -> Vec<Diagnostic> {
         }
     };
 
-    let has_frontmatter = !metadata.is_empty();
+    let has_frontmatter = content.starts_with("---");
 
     // Only validate frontmatter fields that are present
     if has_frontmatter {
