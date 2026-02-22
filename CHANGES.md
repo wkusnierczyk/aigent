@@ -1,5 +1,9 @@
 # Changes
 
+## [0.6.0] — 2026-02-22
+
+- M15: Plugin component validation (#130)
+
 ## [0.5.0] — 2026-02-22
 
 - Move build matrix table from CI to release section in README (#127)
