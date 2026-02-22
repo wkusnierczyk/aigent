@@ -94,17 +94,88 @@ pub fn test_skill(dir: &Path, query: &str) -> Result<TestResult> {
     })
 }
 
+/// Default terminal width for wrapping probe output.
+const DEFAULT_WIDTH: usize = 80;
+
+/// Format a labeled line, wrapping long values so continuation lines align
+/// to the value column. Uses character counts (not byte offsets) so that
+/// multibyte UTF-8 content (e.g., `✓`, `⚠`, `—`) never causes a panic.
+fn fmt_field(out: &mut String, label: &str, value: &str, col: usize, width: usize) {
+    let prefix = format!("{:<col$} ", label);
+    let indent = col + 1; // spaces for continuation lines
+    let max_val = width.saturating_sub(indent);
+    if max_val == 0 || value.chars().count() + indent <= width {
+        out.push_str(&prefix);
+        out.push_str(value);
+        out.push('\n');
+        return;
+    }
+    // Collect char indices for safe slicing on character boundaries.
+    let chars: Vec<(usize, char)> = value.char_indices().collect();
+    let mut char_pos = 0; // index into `chars`
+    let mut first = true;
+    while char_pos < chars.len() {
+        // Skip leading spaces at break boundaries to avoid blank lines.
+        if !first {
+            while char_pos < chars.len() && chars[char_pos].1 == ' ' {
+                char_pos += 1;
+            }
+            if char_pos >= chars.len() {
+                break;
+            }
+        }
+        if first {
+            out.push_str(&prefix);
+        } else {
+            for _ in 0..indent {
+                out.push(' ');
+            }
+        }
+        let remaining_chars = chars.len() - char_pos;
+        if remaining_chars <= max_val {
+            let byte_start = chars[char_pos].0;
+            out.push_str(&value[byte_start..]);
+            out.push('\n');
+            break;
+        }
+        // Find the last space within max_val characters.
+        let end = char_pos + max_val;
+        let break_char = (char_pos..end)
+            .rev()
+            .find(|&i| chars[i].1 == ' ')
+            .unwrap_or(end);
+        let byte_start = chars[char_pos].0;
+        let byte_end = chars[break_char].0;
+        out.push_str(&value[byte_start..byte_end]);
+        out.push('\n');
+        char_pos = break_char;
+        first = false;
+    }
+}
+
 /// Format a test result as human-readable text.
 #[must_use]
 pub fn format_test_result(result: &TestResult) -> String {
+    format_test_result_width(result, DEFAULT_WIDTH)
+}
+
+/// Format a test result with a specific terminal width (for testing).
+#[must_use]
+pub(crate) fn format_test_result_width(result: &TestResult, width: usize) -> String {
     let mut out = String::new();
 
     // Aligned label width (widest label is "Description:" at 12 chars + 1 padding).
     const W: usize = 13;
 
-    out.push_str(&format!("{:<W$} {}\n", "Skill:", result.name));
-    out.push_str(&format!("{:<W$} \"{}\"\n", "Query:", result.query));
-    out.push_str(&format!("{:<W$} {}\n", "Description:", result.description));
+    fmt_field(&mut out, "Skill:", &result.name, W, width);
+    fmt_field(
+        &mut out,
+        "Query:",
+        &format!("\"{}\"", result.query),
+        W,
+        width,
+    );
+    fmt_field(&mut out, "Description:", &result.description, W, width);
     out.push('\n');
 
     // Query match assessment.
@@ -113,16 +184,22 @@ pub fn format_test_result(result: &TestResult) -> String {
         QueryMatch::Weak => "WEAK ⚠ — some overlap, but description may not trigger reliably",
         QueryMatch::None => "NONE ✗ — description does not match the test query",
     };
-    out.push_str(&format!(
-        "{:<W$} {match_label} (score: {:.2})\n",
-        "Activation:", result.score
-    ));
+    fmt_field(
+        &mut out,
+        "Activation:",
+        &format!("{match_label} (score: {:.2})", result.score),
+        W,
+        width,
+    );
 
     // Token budget.
-    out.push_str(&format!(
-        "{:<W$} ~{} tokens\n",
-        "Tokens:", result.estimated_tokens
-    ));
+    fmt_field(
+        &mut out,
+        "Tokens:",
+        &format!("~{} tokens", result.estimated_tokens),
+        W,
+        width,
+    );
     out.push('\n');
 
     // Validation results.
@@ -489,5 +566,111 @@ mod tests {
         let result = test_skill(&dir, "clean skill").unwrap();
         let text = format_test_result(&result);
         assert!(text.contains("PASS"));
+    }
+
+    // ── fmt_field wrapping ──────────────────────────────────────────
+
+    #[test]
+    fn fmt_field_short_value_no_wrap() {
+        let mut out = String::new();
+        fmt_field(&mut out, "Label:", "short", 13, 80);
+        assert_eq!(out, "Label:        short\n");
+    }
+
+    #[test]
+    fn fmt_field_long_value_wraps_aligned() {
+        let mut out = String::new();
+        // Width 40, col 13 → 14 chars for indent, 26 chars for value per line.
+        fmt_field(
+            &mut out,
+            "Description:",
+            "Validates AI agent skill definitions against the spec",
+            13,
+            40,
+        );
+        let lines: Vec<&str> = out.lines().collect();
+        assert!(lines.len() > 1, "expected wrapping, got: {out:?}");
+        // All continuation lines must start with 14 spaces.
+        for line in &lines[1..] {
+            assert!(
+                line.starts_with("              "),
+                "continuation not aligned: {line:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn fmt_field_multibyte_utf8_no_panic() {
+        let mut out = String::new();
+        // Value contains multibyte chars (✓=3 bytes, ⚠=3, —=3).
+        // At width 50, indent 14, max_val=36 chars — slicing must use
+        // char boundaries, not byte offsets, to avoid a panic.
+        fmt_field(
+            &mut out,
+            "Activation:",
+            "WEAK ⚠ — some overlap, but description may not trigger reliably (score: 0.33)",
+            13,
+            50,
+        );
+        let lines: Vec<&str> = out.lines().collect();
+        assert!(lines.len() > 1, "expected wrapping, got: {out:?}");
+        for line in &lines[1..] {
+            assert!(
+                line.starts_with("              "),
+                "continuation not aligned: {line:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn fmt_field_char_count_not_byte_len() {
+        let mut out = String::new();
+        // "café" is 4 chars but 5 bytes (é = 2 bytes).
+        // With width=20, indent=7, max_val=13: "café latte warm" is 15 chars,
+        // triggers wrapping. Byte-based slicing would panic or break incorrectly.
+        fmt_field(&mut out, "Item:", "café latte warm drink", 6, 20);
+        assert!(!out.is_empty(), "should produce output without panic",);
+        // Verify no line exceeds the width in characters.
+        for line in out.lines() {
+            assert!(
+                line.chars().count() <= 20,
+                "line exceeds width: {line:?} ({} chars)",
+                line.chars().count(),
+            );
+        }
+    }
+
+    #[test]
+    fn fmt_field_consecutive_spaces_no_blank_lines() {
+        let mut out = String::new();
+        fmt_field(&mut out, "Label:", "word   word   word   end", 6, 18);
+        for line in out.lines() {
+            let trimmed = line.trim();
+            assert!(!trimmed.is_empty(), "blank continuation line: {out:?}");
+        }
+    }
+
+    #[test]
+    fn format_test_result_wraps_description() {
+        let long_desc = "Validates AI agent skill definitions (SKILL.md files) against \
+            the Anthropic agent skill specification and checks all fields";
+        let (_parent, dir) = make_skill("wrap-test", long_desc, "Body content.");
+        let result = test_skill(&dir, "validate skill").unwrap();
+        let text = format_test_result_width(&result, 60);
+        let desc_lines: Vec<&str> = text
+            .lines()
+            .skip_while(|l| !l.starts_with("Description:"))
+            .take_while(|l| !l.is_empty())
+            .collect();
+        assert!(
+            desc_lines.len() > 1,
+            "description should wrap at width 60: {desc_lines:?}",
+        );
+        for line in &desc_lines[1..] {
+            assert!(
+                line.starts_with("              "),
+                "continuation not aligned: {line:?}",
+            );
+        }
     }
 }
