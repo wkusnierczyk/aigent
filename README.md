@@ -153,7 +153,11 @@ aigent init my-skill/
 # Create a skill from a description
 aigent new "Process PDF files and extract text" --no-llm
 
-# Validate a skill directory (spec conformance)
+# Validate (from inside a skill directory — path defaults to .)
+cd my-skill/
+aigent validate --structure
+
+# Or specify a path explicitly
 aigent validate my-skill/ --structure
 
 # Run validate + semantic quality checks
@@ -758,6 +762,13 @@ Use this skill to Extract text from PDF files.
 ```
 
 #### `probe` — Simulate skill activation
+
+> **Note**
+> Unlike other commands, `probe` requires an explicit skill directory path
+> because it has two positional arguments (`<directory>` and `<query>`).
+> Defaulting the directory would create positional ambiguity. See
+> [#124](https://github.com/wkusnierczyk/aigent/issues/124) for a future
+> follow-up.
 
 Probes whether a skill's description would activate for a given user query.
 This is a dry-run of skill discovery — "if a user said *this*, would Claude
