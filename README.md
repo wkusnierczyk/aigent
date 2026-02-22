@@ -1187,6 +1187,7 @@ src/
 ├── formatter.rs                    # SKILL.md formatting (canonical key order, whitespace)
 ├── assembler.rs                    # Skill-to-plugin assembly
 ├── test_runner.rs                  # Fixture-based testing (tests.yml)
+├── fs_util.rs                      # Symlink-safe filesystem helpers
 ├── main.rs                         # CLI entry point (clap)
 └── builder/
     ├── mod.rs                      # Build pipeline orchestration
