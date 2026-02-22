@@ -2033,3 +2033,112 @@ fn check_defaults_to_current_dir() {
     );
     aigent().arg("check").current_dir(&dir).assert().success();
 }
+
+#[test]
+fn validate_multiple_explicit_paths_no_default_prepended() {
+    let parent = tempdir().unwrap();
+    let dir_a = parent.path().join("skill-a");
+    let dir_b = parent.path().join("skill-b");
+    fs::create_dir(&dir_a).unwrap();
+    fs::create_dir(&dir_b).unwrap();
+    fs::write(
+        dir_a.join("SKILL.md"),
+        "---\nname: skill-a\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
+    )
+    .unwrap();
+    fs::write(
+        dir_b.join("SKILL.md"),
+        "---\nname: skill-b\ndescription: Manages database connections and queries. Use when working with databases.\n---\nBody.\n",
+    )
+    .unwrap();
+    // When explicit paths are given, the default "." must NOT be prepended
+    aigent()
+        .args(["validate", dir_a.to_str().unwrap(), dir_b.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[test]
+fn probe_no_skill_in_cwd_errors_gracefully() {
+    let empty_dir = tempdir().unwrap();
+    aigent()
+        .args(["probe", "--query", "some query"])
+        .current_dir(empty_dir.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("aigent probe:"));
+}
+
+#[test]
+fn probe_multiple_dirs_json_returns_array() {
+    let parent = tempdir().unwrap();
+    let dir_a = parent.path().join("skill-a");
+    let dir_b = parent.path().join("skill-b");
+    fs::create_dir(&dir_a).unwrap();
+    fs::create_dir(&dir_b).unwrap();
+    fs::write(
+        dir_a.join("SKILL.md"),
+        "---\nname: skill-a\ndescription: Processes PDF files and extracts text\n---\nBody.\n",
+    )
+    .unwrap();
+    fs::write(
+        dir_b.join("SKILL.md"),
+        "---\nname: skill-b\ndescription: Manages database connections\n---\nBody.\n",
+    )
+    .unwrap();
+    let output = aigent()
+        .args([
+            "probe",
+            dir_a.to_str().unwrap(),
+            dir_b.to_str().unwrap(),
+            "--query",
+            "process PDF files",
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert!(json.is_array(), "multi-dir JSON should be an array");
+    assert_eq!(json.as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn probe_multiple_dirs_ranked_by_score() {
+    let parent = tempdir().unwrap();
+    let dir_a = parent.path().join("skill-a");
+    let dir_b = parent.path().join("skill-b");
+    fs::create_dir(&dir_a).unwrap();
+    fs::create_dir(&dir_b).unwrap();
+    fs::write(
+        dir_a.join("SKILL.md"),
+        "---\nname: skill-a\ndescription: Manages database connections\n---\nBody.\n",
+    )
+    .unwrap();
+    fs::write(
+        dir_b.join("SKILL.md"),
+        "---\nname: skill-b\ndescription: Processes PDF files and extracts text\n---\nBody.\n",
+    )
+    .unwrap();
+    let output = aigent()
+        .args([
+            "probe",
+            dir_a.to_str().unwrap(),
+            dir_b.to_str().unwrap(),
+            "--query",
+            "process PDF files",
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let arr = json.as_array().unwrap();
+    // skill-b (PDF) should rank higher than skill-a (database)
+    assert_eq!(arr[0]["name"], "skill-b");
+    assert_eq!(arr[1]["name"], "skill-a");
+}
