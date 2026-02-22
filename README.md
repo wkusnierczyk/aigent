@@ -683,11 +683,21 @@ $ aigent format my-skill/
 Formatted my-skill/
 ```
 
-Check mode reports which files would change without modifying them:
+Check mode reports which files would change without modifying them,
+and shows a unified diff of the changes:
 
 ```
 $ aigent format --check my-skill/
 Would reformat: my-skill/
+--- my-skill/
++++ my-skill/ (formatted)
+@@ -1,6 +1,6 @@
+ ---
+-allowed-tools: Bash, Read, Write
+ name: my-skill
+ description: ...
++allowed-tools: Bash, Read, Write
+ ---
 ```
 
 #### `init` — Create a template `SKILL.md`
