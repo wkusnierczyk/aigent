@@ -448,10 +448,11 @@ Full API documentation is available at [docs.rs/aigent](https://docs.rs/aigent).
 >
 > | Old name | Current name |
 > |----------|--------------|
-> | `lint` | `check` |
-> | `to-prompt` | `prompt` |
 > | `create` | `new` |
+> | `fmt` | `format` |
+> | `lint` | `check` |
 > | `test <dir> <query>` | `probe` |
+> | `to-prompt` | `prompt` |
 
 ### Exit codes
 
