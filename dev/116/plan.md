@@ -25,7 +25,7 @@ Two argument patterns exist:
 | Pattern | Commands |
 |---------|----------|
 | `skill_dirs: Vec<PathBuf>` | `validate`, `check`, `prompt`, `doc`, `build`, `test`, `fmt` |
-| `skill_dir: PathBuf` | `properties`, `score`, `probe`, `upgrade` |
+| `skill_dir: PathBuf` | `properties`, `score`, `upgrade` |
 
 ### Commands NOT affected
 
@@ -33,6 +33,7 @@ Two argument patterns exist:
 |---------|-----|
 | `new` | Takes a `purpose` string, not a skill dir |
 | `init` | Already has `dir: Option<PathBuf>` defaulting to `.` |
+| `probe` | Has two positionals (`skill_dir`, `query`); see §Appendix |
 
 ## Changes
 
@@ -59,7 +60,7 @@ For each `skill_dir: PathBuf` field, add the clap attribute:
 skill_dir: PathBuf,
 ```
 
-**Commands**: `Properties`, `Score`, `Probe`, `Upgrade`
+**Commands**: `Properties`, `Score`, `Upgrade`
 
 ### 3. Update CLI tests (`tests/cli.rs`)
 
@@ -79,7 +80,7 @@ default to the current directory.
 
 | File | Change |
 |------|--------|
-| `src/main.rs` | Add `default_value = "."` to 11 commands |
+| `src/main.rs` | Add `default_value = "."` to 10 commands |
 | `tests/cli.rs` | Add tests for default directory behavior |
 | `README.md` | Update CLI reference |
 
@@ -91,3 +92,31 @@ cargo clippy -- -D warnings         # no warnings
 cd test-skill/ && aigent validate   # works with no args
 cd test-skill/ && aigent properties # works with no args
 ```
+
+## Appendix: Why `probe` is excluded
+
+`Probe` has two positional arguments: `<skill-dir> <query>`. Adding
+`default_value = "."` to `skill_dir` creates an ambiguity: `aigent probe
+"hello"` would parse `"hello"` as `skill_dir` (clap fills positionals
+left-to-right), leaving `query` missing — a parse error.
+
+### Options considered
+
+| Approach | Usage | Breaking? | Complexity |
+|----------|-------|:---------:|:----------:|
+| A. Skip `probe` | No change | No | None |
+| B. Make `skill_dir` a `--dir` flag | `aigent probe "hello"` / `aigent probe --dir my-skill/ "hello"` | Yes | Low |
+| C. Swap positional order | `aigent probe "hello"` / `aigent probe "hello" my-skill/` | Yes | Low |
+| D. Collect into `Vec<String>`, disambiguate by arg count | 1 arg = query, 2 args = dir + query | No | Medium |
+
+### Decision: Option A (skip)
+
+The cost-benefit doesn't justify the complexity:
+
+- `probe` always requires a query, so the user is never truly "omitting
+  all args" — defaulting the dir saves one arg out of two.
+- Options B and C break the existing `aigent probe my-skill/ "query"`
+  interface.
+- Option D requires custom runtime parsing and degrades clap's help text.
+- `probe` can be revisited independently if the CLI contract is
+  reconsidered in a future milestone.
