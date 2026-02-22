@@ -212,3 +212,150 @@ first. Consider checking for tag existence in preflight.
 | **Must fix** | §3.3: Depends on `dev/118-version` fix for CHANGES.md sed portability | Blocked |
 | Should fix | §4.3: Check for existing tag in preflight | 5 min |
 | Nice to have | §4.1: Warn when stub text not found in CHANGES.md | 5 min |
+
+---
+
+## Review: Branch `dev/117-release`
+
+Reviewed `dev/117-release` (`c0f3230`) against `main` (`8884129`).
+
+### Design: changelog-first strategy
+
+The implementation significantly redesigns the step sequence from plan v1.
+Instead of the original plan's approach (call `cmd_set` to create a stub
+entry in CHANGES.md, then replace the stub body with awk), the
+implementation writes the full CHANGES.md entry *before* calling `cmd_set`:
+
+```
+write_changelog()  →  cmd_set()  →  stage  →  commit  →  tag  →  push
+```
+
+When `cmd_set` runs, it finds the version entry already exists in CHANGES.md
+(`grep -q "## [$VERSION]"` matches) and skips stub insertion entirely. This
+eliminates the fragile awk stub-replacement mechanism from plan v1 and
+sidesteps the BSD sed portability issue (§3.3), since the buggy `sedi`
+code path for CHANGES.md is never exercised during release.
+
+`write_changelog()` itself uses portable `echo`/`tail`/`mktemp`/`mv`
+(`scripts/version.sh:242–254`) — no awk, no sed, no `\n` in replacements.
+
+This is a better design than plan v1.
+
+### Plan review issue resolution
+
+| Plan issue | Status | How resolved |
+|-----------|:------:|-------------|
+| §3.1: Awk stub replacement bug | **Eliminated** | Changelog-first strategy bypasses stub mechanism |
+| §3.2: Missing `git push` for commit | **Fixed** | `git push origin HEAD "v$VERSION"` (line 333) |
+| §3.3: Inherited sed portability | **Sidestepped** | `cmd_set` skips CHANGES.md write when entry exists |
+| §4.3: Tag existence check | **Fixed** | `git rev-parse "v$VERSION"` in preflight (line 293) |
+| §4.1: Re-release warning | **Fixed** | `write_changelog()` warns and returns (line 237) |
+
+All five plan review action items are addressed.
+
+### Findings
+
+1. **Medium: managed files dirty check gap** — `check_clean_tree()` explicitly
+   ignores `Cargo.toml`, `Cargo.lock`, `.claude-plugin/plugin.json`, `README.md`,
+   and `CHANGES.md` when checking working tree cleanliness
+   (`scripts/version.sh:176–180`). Later, `cmd_release()` stages those same
+   files unconditionally (`scripts/version.sh:323–324`). If any of these files
+   contain unrelated local edits before running `release`, those edits get swept
+   into the release commit without warning.
+
+   Recommended fix (pick one):
+   - Require managed files to be clean too (remove exclusions from
+     `check_clean_tree`, rely on the user having committed/stashed first)
+   - Snapshot the managed files' git blobs before release, diff after
+     `cmd_set`, and warn/abort if unexpected changes appear
+   - Add `--allow-dirty` flag for explicit opt-in
+
+2. **Low: `--dry-run` globally parsed** — The `--dry-run` flag is stripped
+   from `$@` at the top level (lines 374–383), before subcommand dispatch.
+   This means `./scripts/version.sh bump patch --dry-run` is silently
+   accepted — `DRY_RUN` is set to 1 but `cmd_bump` never checks it. Not
+   harmful, but may surprise users who expect dry-run on `bump` or `set`.
+
+   Fix: either move `--dry-run` parsing into `cmd_release` only, or
+   check `DRY_RUN` in the `release)` dispatch case instead.
+
+3. **Low: `write_changelog` assumes fixed CHANGES.md header** — `tail -n +3`
+   skips exactly lines 1–2 ("`# Changes`" + blank line). If CHANGES.md
+   has a different structure (e.g., no blank line after header, or extra
+   preamble), the splice is wrong. Acceptable since the project controls the
+   format, but fragile if the file is manually edited.
+
+### Code quality
+
+- **Bump arithmetic**: duplicated from `cmd_bump` (~10 lines, lines 264–274
+  vs 340–370). Acceptable per plan review §2.5 — `cmd_release` needs the
+  resolved version before calling `cmd_set`.
+- **Semver validation**: present in both `cmd_release` (line 282) and `cmd_set`
+  (line 54) — defense in depth, correct.
+- **Error handling**: `set -euo pipefail` + explicit guards (`command -v gh`,
+  empty `PREV_TAG`, empty `ENTRIES`, existing tag). All abort paths print
+  clear error messages to stderr.
+- **`gh` usage**: `gh repo view --json nameWithOwner` avoids hardcoding the
+  repo name. `--base main` filters to correct branch.
+- **Dry-run**: early return after changelog generation (line 311), before
+  any file modifications. Shows the exact commands that would run.
+
+### README changes
+
+The release workflow section (lines 1326–1358) correctly replaces the manual
+4-step process with the single `release` command. Includes:
+- Explicit version and bump-level examples
+- Numbered step list explaining what the command does
+- `--dry-run` example
+- `gh` CLI prerequisite note
+- Table of CI release steps preserved below
+
+### Validation performed
+
+- Inspected all changes in:
+  - `scripts/version.sh` (+189 lines: 3 new functions + dispatch + `--dry-run` parser)
+  - `README.md` release workflow section (+29/−8 lines)
+- Ran checks:
+  - `bash -n scripts/version.sh` — passes
+  - `git show origin/dev/117-release:scripts/version.sh | bash -n` — passes
+  - `./scripts/version.sh show` — prints current version
+  - Full `--dry-run` path not testable (requires `gh` API access for
+    changelog generation)
+
+### Scope
+
+| Metric | Plan estimate | Actual |
+|--------|:----:|:------:|
+| Modified files | 2 | 2 (+plan/review docs) |
+| New functions | 3 | 4 (`check_clean_tree`, `generate_changelog`, `write_changelog`, `cmd_release`) |
+| Net line delta | +80–100 | +189 (version.sh) +29 (README) |
+
+### Summary
+
+The changelog-first design is a significant improvement over plan v1. All
+five plan review action items are addressed. One medium issue (managed files
+dirty check gap) should be fixed before merge — it's a release-integrity
+risk where unrelated local edits to version-managed files could be silently
+committed. The two low-severity items are non-blocking.
+
+---
+
+## Review round 2: Copilot findings + review.md issues
+
+### Issues addressed
+
+| Source | Issue | Fix |
+|--------|-------|-----|
+| Copilot #3 | Tag check via `git rev-parse` can match branches | Use `--verify --quiet "refs/tags/v$VERSION"` |
+| Copilot #4 | Author time `%aI` unstable under rebases | Switched to committer time `%cI` |
+| Copilot #5 | `grep -q` treats version dots as regex wildcards | Switched to `grep -Fq` (also fixed same pattern in `cmd_set`) |
+| Copilot #1 | No branch/freshness check | Added preflight: verify on `main`, fetch + compare with `origin/main` |
+| Review §2 | `--dry-run` globally parsed, silently accepted on non-release commands | Moved parsing into `cmd_release` only; dispatcher passes `"$@"` via `shift` |
+
+### Issues not addressed (by design)
+
+| Source | Issue | Rationale |
+|--------|-------|-----------|
+| Copilot #2 | `git push origin HEAD` might push to literal `HEAD` ref | Incorrect — `HEAD` is resolved by git to the current branch. `git push origin HEAD v$VERSION` pushes both the branch and the tag. This is documented git behavior. |
+| Review §1 | Managed files dirty check gap | The new branch check (must be on `main`, up-to-date with `origin/main`) significantly reduces this risk — if you're on a clean, synced `main`, the managed files should match their committed state. Remaining edge case (manual edits to managed files without committing) is accepted. |
+| Review §3 | `write_changelog` assumes fixed CHANGES.md header | Acceptable — project controls the format. |

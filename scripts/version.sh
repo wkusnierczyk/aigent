@@ -135,7 +135,7 @@ cmd_set() {
 
     # 4. CHANGES.md — add stub entry if version not already present
     if [[ -f "$CHANGES" ]]; then
-        if ! grep -q "## \[$VERSION\]" "$CHANGES"; then
+        if ! grep -Fq "## [$VERSION]" "$CHANGES"; then
             local TODAY
             TODAY="$(date +%Y-%m-%d)"
             local STUB
@@ -208,7 +208,7 @@ generate_changelog() {
         exit 1
     fi
 
-    SINCE="$(git -C "$ROOT" log -1 --format=%aI "$PREV_TAG")"
+    SINCE="$(git -C "$ROOT" log -1 --format=%cI "$PREV_TAG")"
 
     ENTRIES="$(gh pr list --repo "$(gh repo view --json nameWithOwner -q .nameWithOwner)" \
         --state merged --base main \
@@ -233,7 +233,7 @@ write_changelog() {
     TODAY="$(date +%Y-%m-%d)"
 
     # Check if entry already exists (re-release)
-    if grep -q "## \[$VERSION\]" "$CHANGES"; then
+    if grep -Fq "## [$VERSION]" "$CHANGES"; then
         echo "Warning: CHANGES.md already has entry for $VERSION — keeping existing content." >&2
         return
     fi
@@ -257,7 +257,17 @@ write_changelog() {
 
 # --- release <x.y.z|patch|minor|major> [--dry-run] --------------------------
 cmd_release() {
-    local ARG="$1"
+    # Parse --dry-run from arguments
+    local DRY_RUN=0
+    local RELEASE_ARGS=()
+    for arg in "$@"; do
+        case "$arg" in
+            --dry-run) DRY_RUN=1 ;;
+            *) RELEASE_ARGS+=("$arg") ;;
+        esac
+    done
+
+    local ARG="${RELEASE_ARGS[0]}"
     local VERSION
 
     # Determine target version
@@ -288,9 +298,26 @@ cmd_release() {
     echo ""
 
     # 1. Preflight
+    local BRANCH
+    BRANCH="$(git -C "$ROOT" symbolic-ref --short HEAD 2>/dev/null || true)"
+    if [[ "$BRANCH" != "main" ]]; then
+        echo "Error: releases must be made from 'main' (currently on '$BRANCH')" >&2
+        exit 1
+    fi
+
+    git -C "$ROOT" fetch origin main --quiet
+    local LOCAL REMOTE
+    LOCAL="$(git -C "$ROOT" rev-parse HEAD)"
+    REMOTE="$(git -C "$ROOT" rev-parse origin/main)"
+    if [[ "$LOCAL" != "$REMOTE" ]]; then
+        echo "Error: local main is not up-to-date with origin/main" >&2
+        echo "Run 'git pull' first." >&2
+        exit 1
+    fi
+
     check_clean_tree
 
-    if git -C "$ROOT" rev-parse "v$VERSION" &>/dev/null; then
+    if git -C "$ROOT" rev-parse --verify --quiet "refs/tags/v$VERSION" &>/dev/null; then
         echo "Error: tag v$VERSION already exists" >&2
         exit 1
     fi
@@ -371,17 +398,6 @@ cmd_bump() {
 
 # --- main --------------------------------------------------------------------
 
-# Parse --dry-run from any position
-DRY_RUN=0
-ARGS=()
-for arg in "$@"; do
-    case "$arg" in
-        --dry-run) DRY_RUN=1 ;;
-        *) ARGS+=("$arg") ;;
-    esac
-done
-set -- "${ARGS[@]}"
-
 SUBCOMMAND="${1:-show}"
 
 case "$SUBCOMMAND" in
@@ -407,7 +423,8 @@ case "$SUBCOMMAND" in
             echo "Usage: $0 release <x.y.z|patch|minor|major> [--dry-run]" >&2
             exit 1
         fi
-        cmd_release "$2"
+        shift
+        cmd_release "$@"
         ;;
     *)
         echo "Usage: $0 [show | set <x.y.z> | bump <patch|minor|major> | release <x.y.z|patch|minor|major>]" >&2
