@@ -1306,16 +1306,8 @@ See [dev/plugin-dev.md](dev/plugin-dev.md) for the full analysis.
 The `main` branch is protected: direct pushes are not allowed. Changes are
 merged via squash-merge of pull requests only, requiring green CI/CD and positive reviews.
 
-Every pull request runs the CI pipeline on a
-**OS** x **architecture** matrix.
-
-| Architecture | OS | Full name |
-| --- | --- | --- |
-| x86_64 | linux | `x86_64-unknown-linux-gnu` |
-| aarch64 | linux | `aarch64-unknown-linux-gnu` (via `cross`) |
-| x86_64 | macos | `x86_64-apple-darwin` |
-| aarch64 | macos | `aarch64-apple-darwin` |
-| x86_64 | windows | `x86_64-pc-windows-msvc` |
+Every pull request runs the CI pipeline on three OSes
+(Linux, macOS, Windows).
 
 | Step | Command |
 | --- | --- |
@@ -1340,7 +1332,7 @@ This single command:
 2. Generates a changelog from merged PRs since the previous tag (via `gh`)
 3. Writes the changelog to `CHANGES.md`
 4. Updates version across all files (`Cargo.toml`, `plugin.json`, `README.md`, `Cargo.lock`)
-5. Commits, tags, and pushes — triggering the CI release workflow
+5. Commits, tags, and pushes — triggering the release workflow
 
 Use `--dry-run` to preview without executing:
 
@@ -1351,12 +1343,20 @@ Use `--dry-run` to preview without executing:
 **Prerequisite:** The [`gh` CLI](https://cli.github.com) must be installed and
 authenticated for changelog generation.
 
-Once the `v*` tag is pushed, the CI release workflow runs:
+Once the `v*` tag is pushed, the release workflow runs:
+
+| Architecture | OS | Full name |
+| --- | --- | --- |
+| x86_64 | linux | `x86_64-unknown-linux-gnu` |
+| aarch64 | linux | `aarch64-unknown-linux-gnu` (via `cross`) |
+| x86_64 | macos | `x86_64-apple-darwin` |
+| aarch64 | macos | `aarch64-apple-darwin` |
+| x86_64 | windows | `x86_64-pc-windows-msvc` |
 
 | Step | Action |
 | --- | --- |
 | Test | Full test suite on Ubuntu |
-| Build | Cross-compile (five targets, see CI/CD) |
+| Build | Cross-compile the five targets above |
 | Release | Create GitHub Release with changelog and binary assets |
 | Publish | Publish to [crates.io](https://crates.io/crates/aigent) |
 
