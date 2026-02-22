@@ -125,7 +125,7 @@ fn validate_skill_md_file_path() {
         .args(["validate", skill_md.to_str().unwrap()])
         .assert()
         .success()
-        .stderr(predicate::str::contains("ok"));
+        .stderr(predicate::str::is_match(r"(?m)^ok\r?$").unwrap());
 }
 
 // ── properties ──────────────────────────────────────────────────────
@@ -384,7 +384,7 @@ fn validate_format_text_default() {
         .args(["validate", dir.to_str().unwrap(), "--format", "text"])
         .assert()
         .success()
-        .stderr(predicate::str::contains("ok"));
+        .stderr(predicate::str::is_match(r"(?m)^ok\r?$").unwrap());
 }
 
 #[test]
@@ -478,7 +478,7 @@ fn validate_target_claude_code_accepts_extension_fields() {
         .args(["validate", dir.to_str().unwrap(), "--target", "claude-code"])
         .assert()
         .success()
-        .stderr(predicate::str::contains("ok"));
+        .stderr(predicate::str::is_match(r"(?m)^ok\r?$").unwrap());
 }
 
 #[test]

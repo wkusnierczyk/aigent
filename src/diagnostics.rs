@@ -197,7 +197,7 @@ pub const P003: &str = "P003";
 pub const P004: &str = "P004";
 /// `description` empty or missing.
 pub const P005: &str = "P005";
-/// Custom path uses absolute path (must start with `./`).
+/// Custom path uses an absolute filesystem path (only relative paths are allowed).
 pub const P006: &str = "P006";
 /// Declared component path does not exist on filesystem.
 pub const P007: &str = "P007";
