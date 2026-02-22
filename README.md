@@ -1377,8 +1377,8 @@ Releases are automated via `scripts/version.sh release`:
 
 ```bash
 ./scripts/version.sh release 0.5.0  # explicit version
-./scripts/version.sh release patch   # auto-increment patch
-./scripts/version.sh release minor   # auto-increment minor
+./scripts/version.sh release patch  # auto-increment patch
+./scripts/version.sh release minor  # auto-increment minor
 ```
 
 This single command:
