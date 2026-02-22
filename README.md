@@ -1275,7 +1275,16 @@ Every pull request runs the CI pipeline on a
 
 ### Release workflow
 
-Pushing a version tag (e.g., `v0.1.0`) triggers the release workflow (release on tag):
+Pushing a version tag (e.g., `v0.1.0`) triggers the release workflow.
+
+```bash
+# update version in sources
+cargo set-version 0.5.0    
+git add Cargo.toml Cargo.lock CHANGES.md README.md package.json
+git commit -m "Bump version to 0.5.0"
+git tag v0.5.0
+git push origin v0.5.0
+```
 
 | Step | Action |
 | --- | --- |
