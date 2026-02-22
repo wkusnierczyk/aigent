@@ -24,6 +24,12 @@ pattern that keeps the context window lean.
 The `aigent` tool validates, formats, and assembles these
 skill files so you can focus on writing the instructions rather than fighting the specification.
 
+Beyond individual skills, `aigent` assembles and validates entire
+[Claude Code plugin](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/extensions)
+directories — building plugins from skills with `aigent build`, and checking
+the `plugin.json` manifest, `hooks.json` configuration, agent and command files,
+skill subdirectories, and cross-component consistency with `aigent validate-plugin`.
+
 ## Table of contents
 
 - [Installation](#installation)
@@ -34,8 +40,6 @@ skill files so you can focus on writing the instructions rather than fighting th
 - [Quick start](#quick-start)
 - [Library usage](#library-usage)
 - [`SKILL.md` format](#skillmd-format)
-- [When to use](#when-to-use)
-- [Instructions](#instructions)
   - [Frontmatter fields](#frontmatter-fields)
   - [Validation rules](#validation-rules)
 - [Builder modes](#builder-modes)
@@ -53,9 +57,11 @@ skill files so you can focus on writing the instructions rather than fighting th
     - [`check` flags](#check-flags)
     - [`format` flags](#format-flags)
     - [`new` flags](#new-flags)
+    - [`probe` flags](#probe-flags)
     - [`test` flags](#test-flags)
     - [`upgrade` flags](#upgrade-flags)
     - [`validate` flags](#validate-flags)
+    - [`validate-plugin` flags](#validate-plugin-flags)
   - [Command examples](#command-examples)
     - [`build` — Assemble skills into a plugin](#build--assemble-skills-into-a-plugin)
     - [`check` — Validate + semantic quality checks](#check--validate--semantic-quality-checks)
@@ -70,6 +76,7 @@ skill files so you can focus on writing the instructions rather than fighting th
     - [`test` — Run fixture-based test suites](#test--run-fixture-based-test-suites)
     - [`upgrade` — Detect and apply best-practice improvements](#upgrade--detect-and-apply-best-practice-improvements)
     - [`validate` — Check skill directories for specification conformance](#validate--check-skill-directories-for-specification-conformance)
+    - [`validate-plugin` — Validate a Claude Code plugin directory](#validate-plugin--validate-a-claude-code-plugin-directory)
   - [Watch mode](#watch-mode)
   - [Global flags](#global-flags)
 - [API reference](#api-reference)
@@ -189,14 +196,15 @@ aigent properties my-skill/
 
 # Generate XML prompt for LLM injection
 aigent prompt my-skill/ other-skill/
+
+# Validate a full Claude Code plugin directory
+aigent validate-plugin my-plugin/
 ```
 
-To enable LLM-enhanced generation, set an API key in your environment
-(for example, `export ANTHROPIC_API_KEY=sk-...`). 
-
-Without an API key,
-the builder uses deterministic mode, which requires no configuration.
-See [Builder Modes](#builder-modes) for details.
+To enable LLM-enhanced generation, set an API key for any
+[supported provider](#builder-modes) (Anthropic, OpenAI, Google, or Ollama).
+Without an API key, the builder uses deterministic mode, which requires
+no configuration.
 
 ## Library usage
 
@@ -232,6 +240,11 @@ let spec = aigent::SkillSpec {
     ..Default::default()
 };
 let result = aigent::build_skill(&spec).unwrap();
+
+// Validate a plugin directory (manifest, hooks, agents, commands, skills)
+let manifest_diags = aigent::validate_manifest(Path::new("my-plugin/plugin.json"));
+let hooks_diags = aigent::validate_hooks(Path::new("my-plugin/hooks.json"));
+let cross_diags = aigent::validate_cross_component(Path::new("my-plugin"));
 ```
 
 ## `SKILL.md` format
@@ -374,31 +387,27 @@ go beyond both the specification and the reference implementation.
 ### `aigent` vs. `plugin-dev`
 
 Anthropic's **`plugin-dev`** plugin (bundled with Claude Code) and **`aigent`**
-are complementary tools for skill development.
+are complementary tools for plugin development.
 
 | | **`aigent`** | **`plugin-dev`** |
 |---|---|---|
 | **What** | Rust CLI + library | Claude Code plugin (LLM-guided) |
-| **Scope** | Deep: `SKILL.md` toolchain | Broad: entire plugin ecosystem |
+| **Scope** | Deep: skills + plugin ecosystem validation | Broad: entire plugin ecosystem guidance |
 | **Validation** | Deterministic — typed diagnostics, error codes, JSON output | Heuristic — agent-based review |
+| **Plugin validation** | `aigent validate-plugin` — manifest, hooks, agents, commands, skills, cross-component | `plugin-validator` agent — LLM-driven review |
 | **Scoring** | Weighted 0–100 with CI gating | Not available |
 | **Formatting** | `aigent format` — idempotent, `--check` for CI | Not available |
 | **Testing** | Fixture-based (`tests.yml`) + single-query probe | General guidance only |
 | **Assembly** | `aigent build` — reproducible, scriptable | `/create-plugin` — guided, interactive |
-| **Ecosystem** | Skills only | Skills + commands + agents + hooks + MCP + settings |
 
 Overall:
-* `aigent` handles the **depth** of `SKILL.md` quality enforcement (validation,
-scoring, formatting, testing, assembly). 
-* `plugin-dev` covers the **breadth**
-of the Claude Code plugin ecosystem (7 component types, ~21,000 words of
-guidance). 
+* `aigent` provides **deterministic enforcement** — skill quality (validation,
+scoring, formatting, testing, assembly) and plugin-level validation (manifest,
+hooks, agents, commands, cross-component consistency).
+* `plugin-dev` provides **LLM-guided breadth** across the Claude Code plugin
+ecosystem (7 component types, ~21,000 words of guidance).
 
 Use `plugin-dev` to learn patterns; use `aigent` to enforce them.
-
-> **Note**  
-> `aigent` is in active development and will likely cover more of `plugin-dev`'s
-> functionality in future releases (see [Roadmap](#roadmap)).
 
 For a complete comparison, see [dev/plugin-dev.md](dev/plugin-dev.md).
 
@@ -426,6 +435,7 @@ Features in `aigent` that go beyond the specification and reference implementati
 | Multi-format prompt output | XML, JSON, YAML, Markdown prompt generation |
 | Multi-format validation output | Text and JSON diagnostic output |
 | Token budget estimation | Per-skill and total token usage reporting |
+| Plugin ecosystem validation | Validate full plugin directories: manifest, hooks, agents, commands, skills, cross-component |
 | Claude Code plugin | Hybrid skills that work with or without the CLI installed |
 
 ## CLI reference
@@ -454,6 +464,7 @@ Full API documentation is available at [docs.rs/aigent](https://docs.rs/aigent).
 <tr><td><code>test [dirs...]</code></td><td>Run fixture-based test suites from <code>tests.yml</code></td></tr>
 <tr><td><code>upgrade [directory]</code></td><td>Check a skill for upgrade opportunities</td></tr>
 <tr><td><code>validate [dirs...]</code></td><td>Validate skill directories against the specification</td></tr>
+<tr><td><code>validate-plugin [plugin-dir]</code></td><td>Validate a Claude Code plugin directory (manifest, hooks, agents, commands, skills, cross-component)</td></tr>
 </table>
 
 > **Note**
@@ -494,6 +505,7 @@ what "success" means for each command.
 | `test` | All test cases pass | Any test case fails |
 | `upgrade` | No suggestions, or applied successfully | Unapplied suggestions remain, or error |
 | `validate` | No errors | Errors found (warnings do not affect exit code) |
+| `validate-plugin` | No errors | Errors found in manifest, hooks, agents, commands, skills, or cross-component checks |
 
 ### Command flags
 
@@ -598,7 +610,16 @@ Validate skill directories against the specification.
 | `claude-code` | Standard fields plus Claude Code extension fields (e.g., `argument-hint`, `context`) |
 | `permissive` | No unknown-field warnings; all fields accepted |
 
-> **Note**  
+#### `validate-plugin` flags
+
+Validate a Claude Code plugin directory.
+
+<table>
+<tr><th width="280">Flag</th><th>Description</th></tr>
+<tr><td><code>--format &lt;format&gt;</code></td><td>Output format: <code>text</code> or <code>json</code></td></tr>
+</table>
+
+> **Note**
 > Semantic lint checks are available with `check`.  
 > Use `aigent check` for combined validation + linting, or `aigent check --no-validate` for lint-only.
 
@@ -1046,6 +1067,34 @@ $ aigent validate skills/aigent-validator --format json
 ]
 ```
 
+#### `validate-plugin` — Validate a Claude Code plugin directory
+
+Validates the full plugin ecosystem: `plugin.json` manifest, `hooks.json`,
+agent files, command files, skill directories, and cross-component consistency
+(naming, duplicates, token budget, orphaned files, hook script references).
+
+```
+$ aigent validate-plugin my-plugin/
+plugin.json: ok
+hooks.json: ok
+agents/code-reviewer: ok
+commands/deploy: ok
+skills/pdf-processor: ok
+Cross-component: ok
+```
+
+With errors:
+
+```
+$ aigent validate-plugin my-plugin/
+plugin.json:
+  error [P003]: `name` is not kebab-case: "My Plugin"
+hooks.json:
+  error [H003]: unknown event name: "OnSave"
+Cross-component:
+  warning [X006]: duplicate component name "helper" across agent and command
+```
+
 ### Watch mode
 
 The `--watch` flag on `validate` monitors skill directories for filesystem
@@ -1113,6 +1162,7 @@ Full Rust API documentation with examples is published at
 | `AssembleOptions` | `assembler` | Options for skill-to-plugin assembly (output dir, name, validate) |
 | `AssembleResult` | `assembler` | Assembly output (plugin directory, skill count) |
 | `SkillEntry` | `prompt` | Collected skill entry for prompt generation (name, description, location) |
+| `PluginManifest` | `plugin` | Parsed `plugin.json` manifest with path override accessors |
 | `AigentError` | `errors` | Error enum: `Parse`, `Validation`, `Build`, `Io`, `Yaml` |
 | `Result<T>` | `errors` | Convenience alias for `std::result::Result<T, AigentError>` |
 
@@ -1142,6 +1192,11 @@ Full Rust API documentation with examples is published at
 | `derive_name(&str) -> String` | `builder` | Derive kebab-case name from purpose (deterministic) |
 | `assess_clarity(&str) -> ClarityAssessment` | `builder` | Evaluate if purpose is clear enough for generation |
 | `init_skill(&Path, SkillTemplate) -> Result<PathBuf>` | `builder` | Initialize skill directory with template `SKILL.md` |
+| `validate_manifest(&Path) -> Vec<Diagnostic>` | `plugin` | Validate `plugin.json` manifest |
+| `validate_hooks(&Path) -> Vec<Diagnostic>` | `plugin` | Validate `hooks.json` configuration |
+| `validate_agent(&Path) -> Vec<Diagnostic>` | `plugin` | Validate agent `.md` file |
+| `validate_command(&Path) -> Vec<Diagnostic>` | `plugin` | Validate command `.md` file |
+| `validate_cross_component(&Path) -> Vec<Diagnostic>` | `plugin` | Run cross-component consistency checks |
 
 ### Traits
 
@@ -1239,6 +1294,13 @@ src/
 ├── test_runner.rs                  # Fixture-based testing (tests.yml)
 ├── fs_util.rs                      # Symlink-safe filesystem helpers
 ├── main.rs                         # CLI entry point (clap)
+├── plugin/
+│   ├── mod.rs                      # Plugin module declarations
+│   ├── manifest.rs                 # plugin.json manifest validation
+│   ├── hooks.rs                    # hooks.json validation
+│   ├── agent.rs                    # Agent file (.md) validation
+│   ├── command.rs                  # Command file (.md) validation
+│   └── cross.rs                    # Cross-component consistency checks
 └── builder/
     ├── mod.rs                      # Build pipeline orchestration
     ├── deterministic.rs            # Heuristic name/description/body generation
@@ -1260,7 +1322,7 @@ time via `env!("CARGO_PKG_VERSION")`.
 
 ### Milestones
 
-**Status:** Implementation complete (M1–M14). In review.
+**Status:** Implementation complete (M1–M15).
 
 Project tracked at
 [github.com/users/wkusnierczyk/projects/39](https://github.com/users/wkusnierczyk/projects/39).
@@ -1281,23 +1343,15 @@ Project tracked at
 | M12 | Ecosystem and Workflow | ✅ |
 | M13 | Enhancements | ✅ |
 | M14 | SRE Review | ✅ |
-| M15 | Plugin Ecosystem Validation | 🔲 |
+| M15 | Plugin Ecosystem Validation | ✅ |
 
 ### Roadmap
 
-**M15: Plugin Ecosystem Validation** — extend `aigent`'s deterministic
-validation from `SKILL.md` to the full Claude Code plugin ecosystem.
-Complements [`plugin-dev`](dev/plugin-dev.md) by mechanizing the rules it
-teaches through prose and LLM-driven agents:
+See [open issues](https://github.com/wkusnierczyk/aigent/issues) for planned work.
 
-- Hook validation (`hooks.json`) — replaces `plugin-dev`'s `validate-hook-schema.sh`
-- Agent file validation (`.md` frontmatter) — replaces `plugin-dev`'s `validate-agent.sh`
-- Plugin manifest validation (`plugin.json`) — mechanizes `plugin-validator` agent checks
-- Command file validation (`.md` frontmatter) — first deterministic validator for commands
-- Cross-component consistency checks — unique to `aigent`, no `plugin-dev` equivalent
-
-5 issues ([#97](https://github.com/wkusnierczyk/aigent/issues/97)–[#101](https://github.com/wkusnierczyk/aigent/issues/101)).
-See [dev/plugin-dev.md](dev/plugin-dev.md) for the full analysis.
+Notable: [#131](https://github.com/wkusnierczyk/aigent/issues/131) — modular CLI
+redesign with subcommand groups (`aigent skill ...`, `aigent plugin ...`) for
+when additional AI agent domains are supported.
 
 ## CI/CD and release workflows
 
@@ -1321,9 +1375,9 @@ Every pull request runs the CI pipeline on three OSes
 Releases are automated via `scripts/version.sh release`:
 
 ```bash
-./scripts/version.sh release 0.5.0     # explicit version
-./scripts/version.sh release patch      # auto-increment patch
-./scripts/version.sh release minor      # auto-increment minor
+./scripts/version.sh release 0.5.0  # explicit version
+./scripts/version.sh release patch  # auto-increment patch
+./scripts/version.sh release minor  # auto-increment minor
 ```
 
 This single command:

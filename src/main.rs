@@ -168,6 +168,9 @@ enum Commands {
         /// Interactive mode with step-by-step confirmation
         #[arg(long, short = 'i')]
         interactive: bool,
+        /// Skip scaffolding of examples/ and scripts/ directories
+        #[arg(long)]
+        minimal: bool,
     },
     /// Score a skill against best-practices checklist
     Score {
@@ -260,6 +263,15 @@ enum Commands {
         #[arg(long)]
         recursive: bool,
     },
+    /// Validate a Claude Code plugin directory
+    ValidatePlugin {
+        /// Path to plugin root directory [default: .]
+        #[arg(name = "plugin-dir", default_value = ".")]
+        plugin_dir: PathBuf,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
     /// Initialize a skill directory with a template SKILL.md
     Init {
         /// Target directory
@@ -267,6 +279,9 @@ enum Commands {
         /// Template variant for skill structure
         #[arg(long, value_enum, default_value_t = SkillTemplate::Minimal)]
         template: SkillTemplate,
+        /// Skip scaffolding of examples/ and scripts/ directories
+        #[arg(long)]
+        minimal: bool,
     },
 }
 
@@ -389,7 +404,7 @@ fn main() {
                             eprintln!("  {d}");
                         }
                     }
-                    // Print summary for multi-dir.
+                    // Print summary for multi-dir, or "ok" for clean single-dir.
                     if multi {
                         let total = all_diags.len();
                         let errors = all_diags
@@ -406,6 +421,13 @@ fn main() {
                         eprintln!(
                             "\n{total} skills: {ok} ok, {errors} errors, {warnings} warnings only"
                         );
+                    } else {
+                        let total_diags: usize =
+                            all_diags.iter().map(|(_, d)| d.len()).sum::<usize>()
+                                + conflict_diags.len();
+                        if total_diags == 0 {
+                            eprintln!("ok");
+                        }
                     }
                 }
                 Format::Json => {
@@ -544,6 +566,11 @@ fn main() {
                         eprintln!(
                             "\n{total} skills: {ok} ok, {errors} errors, {warnings} warnings only"
                         );
+                    } else {
+                        let total_diags: usize = all_diags.iter().map(|(_, d)| d.len()).sum();
+                        if total_diags == 0 {
+                            eprintln!("ok");
+                        }
                     }
                 }
                 Format::Json => {
@@ -657,12 +684,14 @@ fn main() {
             dir,
             no_llm,
             interactive,
+            minimal,
         }) => {
             let spec = aigent::SkillSpec {
                 purpose,
                 name,
                 output_dir: dir,
                 no_llm,
+                minimal,
                 ..Default::default()
             };
             let result = if interactive {
@@ -1017,13 +1046,129 @@ fn main() {
                 }
             }
 
+            // Print "ok" for single-dir text mode with no changes and no errors.
+            if !any_error && !any_changed && dirs.len() == 1 {
+                eprintln!("ok");
+            }
+
             if any_error || (check && any_changed) {
                 std::process::exit(1);
             }
         }
-        Some(Commands::Init { dir, template }) => {
+        Some(Commands::ValidatePlugin { plugin_dir, format }) => {
+            let mut all_diags: Vec<(String, Vec<Diagnostic>)> = Vec::new();
+
+            // Validate manifest
+            let manifest_path = plugin_dir.join("plugin.json");
+            let manifest_diags = aigent::validate_manifest(&manifest_path);
+            all_diags.push(("plugin.json".to_string(), manifest_diags));
+
+            // Validate hooks if hooks.json exists
+            let hooks_path = plugin_dir.join("hooks.json");
+            if hooks_path.exists() {
+                let hooks_diags = aigent::validate_hooks(&hooks_path);
+                all_diags.push(("hooks.json".to_string(), hooks_diags));
+            }
+
+            // Validate agent files
+            let agents_dir = plugin_dir.join("agents");
+            if agents_dir.is_dir() {
+                if let Ok(entries) = std::fs::read_dir(&agents_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().is_some_and(|e| e == "md") {
+                            let label =
+                                format!("agents/{}", path.file_name().unwrap().to_string_lossy());
+                            let agent_diags = aigent::validate_agent(&path);
+                            all_diags.push((label, agent_diags));
+                        }
+                    }
+                }
+            }
+
+            // Validate command files
+            let commands_dir = plugin_dir.join("commands");
+            if commands_dir.is_dir() {
+                if let Ok(entries) = std::fs::read_dir(&commands_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().is_some_and(|e| e == "md") {
+                            let label =
+                                format!("commands/{}", path.file_name().unwrap().to_string_lossy());
+                            let cmd_diags = aigent::validate_command(&path);
+                            all_diags.push((label, cmd_diags));
+                        }
+                    }
+                }
+            }
+
+            // Validate skill directories (each subdirectory under skills/)
+            let skills_dir = plugin_dir.join("skills");
+            if skills_dir.is_dir() {
+                if let Ok(entries) = std::fs::read_dir(&skills_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.is_dir() && path.join("SKILL.md").exists() {
+                            let label =
+                                format!("skills/{}", path.file_name().unwrap().to_string_lossy());
+                            let skill_diags = aigent::validate(&path);
+                            all_diags.push((label, skill_diags));
+                        }
+                    }
+                }
+            }
+
+            // Cross-component consistency checks (X-series)
+            let cross_diags = aigent::validate_cross_component(&plugin_dir);
+            if !cross_diags.is_empty() {
+                all_diags.push(("<cross-component>".to_string(), cross_diags));
+            }
+
+            let has_errors = all_diags
+                .iter()
+                .any(|(_, d)| d.iter().any(|d| d.is_error()));
+
+            match format {
+                Format::Text => {
+                    let total_diags: usize = all_diags.iter().map(|(_, d)| d.len()).sum();
+                    for (label, diags) in &all_diags {
+                        if !diags.is_empty() {
+                            eprintln!("{label}:");
+                            for d in diags {
+                                eprintln!("  {d}");
+                            }
+                        }
+                    }
+                    if total_diags == 0 {
+                        eprintln!("Plugin validation passed.");
+                    }
+                }
+                Format::Json => {
+                    let entries: Vec<serde_json::Value> = all_diags
+                        .iter()
+                        .map(|(label, diags)| {
+                            serde_json::json!({
+                                "path": label,
+                                "diagnostics": diags,
+                            })
+                        })
+                        .collect();
+                    let json = serde_json::to_string_pretty(&entries).unwrap();
+                    println!("{json}");
+                }
+            }
+
+            if has_errors {
+                std::process::exit(1);
+            }
+        }
+        Some(Commands::Init {
+            dir,
+            template,
+            minimal,
+        }) => {
             let target = dir.unwrap_or_else(|| PathBuf::from("."));
-            match aigent::init_skill(&target, template) {
+            match aigent::init_skill(&target, template, minimal) {
                 Ok(path) => {
                     println!("Created {}", path.display());
                 }

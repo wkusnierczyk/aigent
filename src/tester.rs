@@ -99,9 +99,12 @@ pub fn test_skill(dir: &Path, query: &str) -> Result<TestResult> {
 pub fn format_test_result(result: &TestResult) -> String {
     let mut out = String::new();
 
-    out.push_str(&format!("Skill: {}\n", result.name));
-    out.push_str(&format!("Query: \"{}\"\n", result.query));
-    out.push_str(&format!("Description: {}\n", result.description));
+    // Aligned label width (widest label is "Description:" at 12 chars + 1 padding).
+    const W: usize = 13;
+
+    out.push_str(&format!("{:<W$} {}\n", "Skill:", result.name));
+    out.push_str(&format!("{:<W$} \"{}\"\n", "Query:", result.query));
+    out.push_str(&format!("{:<W$} {}\n", "Description:", result.description));
     out.push('\n');
 
     // Query match assessment.
@@ -111,14 +114,14 @@ pub fn format_test_result(result: &TestResult) -> String {
         QueryMatch::None => "NONE ✗ — description does not match the test query",
     };
     out.push_str(&format!(
-        "Activation: {match_label} (score: {:.2})\n",
-        result.score
+        "{:<W$} {match_label} (score: {:.2})\n",
+        "Activation:", result.score
     ));
 
     // Token budget.
     out.push_str(&format!(
-        "Token footprint: ~{} tokens\n",
-        result.estimated_tokens
+        "{:<W$} ~{} tokens\n",
+        "Tokens:", result.estimated_tokens
     ));
     out.push('\n');
 

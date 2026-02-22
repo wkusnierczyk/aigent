@@ -6,6 +6,9 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::tempdir;
 
+/// Pattern that matches a standalone "ok" line in CLI output.
+const OK_LINE: &str = r"(?m)^\s*ok\s*$";
+
 /// Return a `Command` for the `aigent` binary built by Cargo.
 fn aigent() -> Command {
     cargo_bin_cmd!("aigent")
@@ -75,7 +78,7 @@ fn validate_valid_skill() {
         .args(["validate", dir.to_str().unwrap()])
         .assert()
         .success()
-        .stderr(predicate::str::is_empty());
+        .stderr(predicate::str::is_match(OK_LINE).unwrap());
 }
 
 #[test]
@@ -125,7 +128,7 @@ fn validate_skill_md_file_path() {
         .args(["validate", skill_md.to_str().unwrap()])
         .assert()
         .success()
-        .stderr(predicate::str::is_empty());
+        .stderr(predicate::str::is_match(OK_LINE).unwrap());
 }
 
 // ── properties ──────────────────────────────────────────────────────
@@ -384,7 +387,7 @@ fn validate_format_text_default() {
         .args(["validate", dir.to_str().unwrap(), "--format", "text"])
         .assert()
         .success()
-        .stderr(predicate::str::is_empty());
+        .stderr(predicate::str::is_match(OK_LINE).unwrap());
 }
 
 #[test]
@@ -478,7 +481,7 @@ fn validate_target_claude_code_accepts_extension_fields() {
         .args(["validate", dir.to_str().unwrap(), "--target", "claude-code"])
         .assert()
         .success()
-        .stderr(predicate::str::is_empty());
+        .stderr(predicate::str::is_match(OK_LINE).unwrap());
 }
 
 #[test]
@@ -491,7 +494,7 @@ fn validate_target_permissive_no_unknown_field_warnings() {
         .args(["validate", dir.to_str().unwrap(), "--target", "permissive"])
         .assert()
         .success()
-        .stderr(predicate::str::is_empty());
+        .stderr(predicate::str::is_match(OK_LINE).unwrap());
 }
 
 // ── check command (validate + semantic) ───────────────────────────
@@ -570,7 +573,7 @@ fn check_perfect_skill_no_output() {
         .args(["check", dir.to_str().unwrap()])
         .assert()
         .success()
-        .stderr(predicate::str::is_empty());
+        .stderr(predicate::str::is_match(OK_LINE).unwrap());
 }
 
 #[test]
@@ -1071,7 +1074,7 @@ fn validate_structure_clean_skill_no_warnings() {
         .args(["validate", dir.to_str().unwrap(), "--structure"])
         .assert()
         .success()
-        .stderr(predicate::str::is_empty());
+        .stderr(predicate::str::is_match(OK_LINE).unwrap());
 }
 
 // ── M12: doc subcommand ──────────────────────────────────────────
@@ -2141,4 +2144,342 @@ fn probe_multiple_dirs_ranked_by_score() {
     // skill-b (PDF) should rank higher than skill-a (database)
     assert_eq!(arr[0]["name"], "skill-b");
     assert_eq!(arr[1]["name"], "skill-a");
+}
+
+// ── validate-plugin ──────────────────────────────────────────────
+
+/// Helper: write a plugin.json in a temp dir and return (dir, path).
+fn make_plugin_dir(content: &str) -> (tempfile::TempDir, PathBuf) {
+    let dir = tempdir().unwrap();
+    let path = dir.path().to_path_buf();
+    fs::write(path.join("plugin.json"), content).unwrap();
+    (dir, path)
+}
+
+#[test]
+fn validate_plugin_valid_manifest() {
+    let (_dir, path) = make_plugin_dir(
+        r#"{ "name": "my-plugin", "description": "A test plugin", "version": "1.0.0", "author": "Test", "homepage": "https://example.com", "license": "MIT" }"#,
+    );
+    aigent()
+        .args(["validate-plugin", path.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Plugin validation passed"));
+}
+
+#[test]
+fn validate_plugin_missing_plugin_json() {
+    let dir = tempdir().unwrap();
+    aigent()
+        .args(["validate-plugin", dir.path().to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot read plugin.json"));
+}
+
+#[test]
+fn validate_plugin_invalid_json() {
+    let (_dir, path) = make_plugin_dir("{ not json }");
+    aigent()
+        .args(["validate-plugin", path.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid JSON syntax"));
+}
+
+#[test]
+fn validate_plugin_missing_name() {
+    let (_dir, path) = make_plugin_dir(r#"{ "description": "test" }"#);
+    aigent()
+        .args(["validate-plugin", path.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("missing required field `name`"));
+}
+
+#[test]
+fn validate_plugin_invalid_name() {
+    let (_dir, path) = make_plugin_dir(r#"{ "name": "My Plugin" }"#);
+    aigent()
+        .args(["validate-plugin", path.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not valid kebab-case"));
+}
+
+#[test]
+fn validate_plugin_bad_version() {
+    let (_dir, path) = make_plugin_dir(r#"{ "name": "test", "version": "1.0" }"#);
+    aigent()
+        .args(["validate-plugin", path.to_str().unwrap()])
+        .assert()
+        .success() // P004 is a warning, not an error
+        .stderr(predicate::str::contains("not valid semver"));
+}
+
+#[test]
+fn validate_plugin_json_format() {
+    let (_dir, path) = make_plugin_dir(r#"{ "name": "test" }"#);
+    let output = aigent()
+        .args([
+            "validate-plugin",
+            path.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let arr = json.as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+    let diags = arr[0]["diagnostics"].as_array().unwrap();
+    // Should have at least P005 (missing description) and P010s (missing recommended fields)
+    assert!(diags.iter().any(|d| d["code"] == "P005"));
+}
+
+#[test]
+fn validate_plugin_defaults_to_current_dir() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("plugin.json"),
+        r#"{ "name": "my-plugin", "description": "test", "author": "x", "homepage": "x", "license": "MIT" }"#,
+    )
+    .unwrap();
+    aigent()
+        .arg("validate-plugin")
+        .current_dir(dir.path())
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Plugin validation passed"));
+}
+
+#[test]
+fn validate_plugin_credential_detection() {
+    let (_dir, path) =
+        make_plugin_dir(r#"{ "name": "test", "config": { "value": "api_key: 'sk-1234abcd'" } }"#);
+    aigent()
+        .args(["validate-plugin", path.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("credential"));
+}
+
+#[test]
+fn validate_plugin_discovers_hooks() {
+    let dir = tempdir().unwrap();
+    let path = dir.path();
+    fs::write(
+        path.join("plugin.json"),
+        r#"{ "name": "test", "description": "t", "author": "x", "homepage": "x", "license": "MIT" }"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("hooks.json"),
+        r#"{ "BadEvent": [{ "hooks": [{ "type": "command", "command": "echo" }] }] }"#,
+    )
+    .unwrap();
+    aigent()
+        .args(["validate-plugin", path.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unknown event name"));
+}
+
+#[test]
+fn validate_plugin_discovers_agents() {
+    let dir = tempdir().unwrap();
+    let path = dir.path();
+    fs::write(
+        path.join("plugin.json"),
+        r#"{ "name": "test", "description": "t", "author": "x", "homepage": "x", "license": "MIT" }"#,
+    )
+    .unwrap();
+    let agents_dir = path.join("agents");
+    fs::create_dir(&agents_dir).unwrap();
+    fs::write(
+        agents_dir.join("bad.md"),
+        "---\nname: helper\nmodel: gpt-4\ncolor: orange\n---\nShort.\n",
+    )
+    .unwrap();
+    aigent()
+        .args(["validate-plugin", path.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("agents/bad.md"))
+        .stderr(predicate::str::contains("`model` is not valid"));
+}
+
+#[test]
+fn validate_plugin_discovers_commands() {
+    let dir = tempdir().unwrap();
+    let path = dir.path();
+    fs::write(
+        path.join("plugin.json"),
+        r#"{ "name": "test", "description": "t", "author": "x", "homepage": "x", "license": "MIT" }"#,
+    )
+    .unwrap();
+    let cmds_dir = path.join("commands");
+    fs::create_dir(&cmds_dir).unwrap();
+    fs::write(cmds_dir.join("empty.md"), "---\nmodel: haiku\n---\n").unwrap();
+    aigent()
+        .args(["validate-plugin", path.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("commands/empty.md"))
+        .stderr(predicate::str::contains("command body is empty"));
+}
+
+#[test]
+fn validate_plugin_json_includes_all_components() {
+    let dir = tempdir().unwrap();
+    let path = dir.path();
+    fs::write(
+        path.join("plugin.json"),
+        r#"{ "name": "test", "description": "t", "author": "x", "homepage": "x", "license": "MIT" }"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("hooks.json"),
+        r#"{ "PreToolUse": [{ "hooks": [{ "type": "command", "command": "echo" }] }] }"#,
+    )
+    .unwrap();
+    let agents_dir = path.join("agents");
+    fs::create_dir(&agents_dir).unwrap();
+    fs::write(
+        agents_dir.join("reviewer.md"),
+        "---\nname: code-reviewer\ndescription: Reviews code for quality\nmodel: sonnet\ncolor: blue\n---\nYou review code carefully and provide helpful feedback to improve quality.\n",
+    )
+    .unwrap();
+    let output = aigent()
+        .args([
+            "validate-plugin",
+            path.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let arr = json.as_array().unwrap();
+    // Should have plugin.json, hooks.json, and agents/reviewer.md
+    assert!(
+        arr.len() >= 3,
+        "expected at least 3 entries, got {}",
+        arr.len()
+    );
+    let paths: Vec<&str> = arr.iter().map(|e| e["path"].as_str().unwrap()).collect();
+    assert!(paths.contains(&"plugin.json"));
+    assert!(paths.contains(&"hooks.json"));
+    assert!(paths.iter().any(|p| p.starts_with("agents/")));
+}
+
+// ── Scaffolding (#111) ─────────────────────────────────────────────
+
+#[test]
+fn init_creates_scaffolding_dirs() {
+    let parent = tempfile::tempdir().unwrap();
+    let dir = parent.path().join("scaffold-test");
+    aigent()
+        .args(["init", dir.to_str().unwrap()])
+        .assert()
+        .success();
+    assert!(dir.join("examples").is_dir());
+    assert!(dir.join("examples/.gitkeep").exists());
+    assert!(dir.join("scripts").is_dir());
+    assert!(dir.join("scripts/.gitkeep").exists());
+}
+
+#[test]
+fn init_minimal_skips_scaffolding_dirs() {
+    let parent = tempfile::tempdir().unwrap();
+    let dir = parent.path().join("minimal-test");
+    aigent()
+        .args(["init", dir.to_str().unwrap(), "--minimal"])
+        .assert()
+        .success();
+    assert!(dir.join("SKILL.md").exists());
+    assert!(!dir.join("examples").exists());
+    assert!(!dir.join("scripts").exists());
+}
+
+#[test]
+fn new_creates_scaffolding_dirs() {
+    let parent = tempfile::tempdir().unwrap();
+    let dir = parent.path().join("processing-pdf-files");
+    aigent()
+        .args([
+            "new",
+            "Process PDF files",
+            "--no-llm",
+            "--dir",
+            dir.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    assert!(dir.join("examples").is_dir());
+    assert!(dir.join("scripts").is_dir());
+}
+
+#[test]
+fn new_minimal_skips_scaffolding_dirs() {
+    let parent = tempfile::tempdir().unwrap();
+    let dir = parent.path().join("processing-pdf-files");
+    aigent()
+        .args([
+            "new",
+            "Process PDF files",
+            "--no-llm",
+            "--dir",
+            dir.to_str().unwrap(),
+            "--minimal",
+        ])
+        .assert()
+        .success();
+    assert!(dir.join("SKILL.md").exists());
+    assert!(!dir.join("examples").exists());
+    assert!(!dir.join("scripts").exists());
+}
+
+// ── Test runner strength (#104) ────────────────────────────────────
+
+#[test]
+fn test_generate_emits_strength() {
+    let (_parent, dir) = make_skill_dir(
+        "strength-gen",
+        "---\nname: strength-gen\ndescription: Processes documents. Use when handling files.\n---\nBody.\n",
+    );
+    aigent()
+        .args(["test", dir.to_str().unwrap(), "--generate"])
+        .assert()
+        .success();
+    let content = fs::read_to_string(dir.join("tests.yml")).unwrap();
+    assert!(
+        content.contains("strength: strong"),
+        "generated fixture should use strength, got:\n{content}"
+    );
+    assert!(
+        !content.contains("min_score"),
+        "generated fixture should not use min_score"
+    );
+}
+
+#[test]
+fn test_strength_weak_passes_for_matching_query() {
+    let (_parent, dir) = make_skill_dir(
+        "strength-weak",
+        "---\nname: strength-weak\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
+    );
+    fs::write(
+        dir.join("tests.yml"),
+        "queries:\n  - input: \"process PDF files\"\n    should_match: true\n    strength: weak\n",
+    )
+    .unwrap();
+    aigent()
+        .args(["test", dir.to_str().unwrap()])
+        .assert()
+        .success();
 }

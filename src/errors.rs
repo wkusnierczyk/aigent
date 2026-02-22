@@ -33,6 +33,13 @@ pub enum AigentError {
         /// Description of the build failure.
         message: String,
     },
+
+    /// Path already exists (e.g., SKILL.md during init/new).
+    #[error("already exists: {}", path.display())]
+    AlreadyExists {
+        /// The path that already exists.
+        path: std::path::PathBuf,
+    },
 }
 
 /// Format validation errors for display.

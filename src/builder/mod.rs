@@ -30,8 +30,8 @@ fn write_exclusive(path: &Path, content: &[u8]) -> Result<()> {
         .open(path)
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::AlreadyExists {
-                AigentError::Build {
-                    message: format!("SKILL.md already exists: {}", path.display()),
+                AigentError::AlreadyExists {
+                    path: path.to_path_buf(),
                 }
             } else {
                 AigentError::Build {
@@ -67,6 +67,8 @@ pub struct SkillSpec {
     pub output_dir: Option<PathBuf>,
     /// Force deterministic mode (no LLM) regardless of environment.
     pub no_llm: bool,
+    /// Skip scaffolding of `examples/` and `scripts/` directories.
+    pub minimal: bool,
     /// Template variant for generating the skill structure.
     pub template: SkillTemplate,
 }
@@ -219,6 +221,11 @@ pub fn build_skill(spec: &SkillSpec) -> Result<BuildResult> {
         }
     }
 
+    // 10b. Scaffold supporting directories unless minimal.
+    if !spec.minimal {
+        scaffold_dirs(&output_dir)?;
+    }
+
     // 11. Validate output.
     let diags = validate(&output_dir);
     let errors: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
@@ -273,7 +280,10 @@ pub fn assess_clarity(purpose: &str) -> ClarityAssessment {
 /// Creates the directory if it doesn't exist. Returns an error if a SKILL.md
 /// (or skill.md) already exists in the target directory. The `tmpl` parameter
 /// selects the template variant; use `SkillTemplate::Minimal` for the default.
-pub fn init_skill(dir: &Path, tmpl: SkillTemplate) -> Result<PathBuf> {
+///
+/// When `minimal` is false (default), also creates `examples/` and `scripts/`
+/// subdirectories with `.gitkeep` files, unless the template already populated them.
+pub fn init_skill(dir: &Path, tmpl: SkillTemplate, minimal: bool) -> Result<PathBuf> {
     // Derive directory name for the template.
     // Filter out "." and ".." which produce empty kebab-case names.
     let dir_name = dir
@@ -329,7 +339,27 @@ pub fn init_skill(dir: &Path, tmpl: SkillTemplate) -> Result<PathBuf> {
         }
     }
 
+    // Scaffold supporting directories unless --minimal.
+    if !minimal {
+        scaffold_dirs(dir)?;
+    }
+
     Ok(dir.join("SKILL.md"))
+}
+
+/// Create `examples/` and `scripts/` subdirectories with `.gitkeep` files.
+///
+/// Only creates each directory if it doesn't already exist, so template-generated
+/// files (e.g., `scripts/run.sh`) take precedence.
+fn scaffold_dirs(dir: &Path) -> Result<()> {
+    for subdir in &["examples", "scripts"] {
+        let path = dir.join(subdir);
+        if !path.exists() {
+            std::fs::create_dir_all(&path)?;
+            std::fs::write(path.join(".gitkeep"), "")?;
+        }
+    }
+    Ok(())
 }
 
 /// Run an interactive build session, prompting for confirmation at each step.
@@ -455,7 +485,7 @@ mod tests {
     fn init_creates_skill_md_in_empty_dir() {
         let parent = tempdir().unwrap();
         let dir = parent.path().join("my-skill");
-        let _ = init_skill(&dir, SkillTemplate::Minimal).unwrap();
+        let _ = init_skill(&dir, SkillTemplate::Minimal, false).unwrap();
         assert!(dir.join("SKILL.md").exists());
     }
 
@@ -463,7 +493,7 @@ mod tests {
     fn init_returns_path_to_created_file() {
         let parent = tempdir().unwrap();
         let dir = parent.path().join("my-skill");
-        let path = init_skill(&dir, SkillTemplate::Minimal).unwrap();
+        let path = init_skill(&dir, SkillTemplate::Minimal, false).unwrap();
         assert_eq!(path, dir.join("SKILL.md"));
     }
 
@@ -471,7 +501,7 @@ mod tests {
     fn init_created_file_has_valid_frontmatter() {
         let parent = tempdir().unwrap();
         let dir = parent.path().join("my-skill");
-        init_skill(&dir, SkillTemplate::Minimal).unwrap();
+        init_skill(&dir, SkillTemplate::Minimal, false).unwrap();
         // The file should be parseable.
         let result = crate::read_properties(&dir);
         assert!(
@@ -484,7 +514,7 @@ mod tests {
     fn init_name_derived_from_directory() {
         let parent = tempdir().unwrap();
         let dir = parent.path().join("cool-tool");
-        init_skill(&dir, SkillTemplate::Minimal).unwrap();
+        init_skill(&dir, SkillTemplate::Minimal, false).unwrap();
         let props = crate::read_properties(&dir).unwrap();
         assert_eq!(props.name, "cool-tool");
     }
@@ -495,7 +525,7 @@ mod tests {
         let dir = parent.path().join("my-skill");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("SKILL.md"), "---\nname: x\n---\n").unwrap();
-        let result = init_skill(&dir, SkillTemplate::Minimal);
+        let result = init_skill(&dir, SkillTemplate::Minimal, false);
         assert!(result.is_err(), "should fail if SKILL.md already exists");
         let err = result.unwrap_err().to_string();
         assert!(
@@ -509,7 +539,7 @@ mod tests {
         let parent = tempdir().unwrap();
         let dir = parent.path().join("nonexistent-dir");
         assert!(!dir.exists());
-        init_skill(&dir, SkillTemplate::Minimal).unwrap();
+        init_skill(&dir, SkillTemplate::Minimal, false).unwrap();
         assert!(dir.exists());
         assert!(dir.join("SKILL.md").exists());
     }
@@ -520,7 +550,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let parent = tempdir().unwrap();
         let dir = parent.path().join("code-skill");
-        init_skill(&dir, SkillTemplate::CodeSkill).unwrap();
+        init_skill(&dir, SkillTemplate::CodeSkill, false).unwrap();
         let script = dir.join("scripts/run.sh");
         assert!(script.exists(), "scripts/run.sh should exist");
         let perms = std::fs::metadata(&script).unwrap().permissions();
@@ -529,6 +559,81 @@ mod tests {
             "scripts/run.sh should be executable, mode: {:o}",
             perms.mode()
         );
+    }
+
+    // ── scaffolding tests ──────────────────────────────────────────────
+
+    #[test]
+    fn init_creates_scaffolding_dirs_by_default() {
+        let parent = tempdir().unwrap();
+        let dir = parent.path().join("scaffold-skill");
+        init_skill(&dir, SkillTemplate::Minimal, false).unwrap();
+        assert!(dir.join("examples").is_dir(), "examples/ should be created");
+        assert!(
+            dir.join("examples/.gitkeep").exists(),
+            "examples/.gitkeep should exist"
+        );
+        assert!(dir.join("scripts").is_dir(), "scripts/ should be created");
+        assert!(
+            dir.join("scripts/.gitkeep").exists(),
+            "scripts/.gitkeep should exist"
+        );
+    }
+
+    #[test]
+    fn init_minimal_skips_scaffolding() {
+        let parent = tempdir().unwrap();
+        let dir = parent.path().join("minimal-skill");
+        init_skill(&dir, SkillTemplate::Minimal, true).unwrap();
+        assert!(!dir.join("examples").exists(), "examples/ should not exist");
+        assert!(!dir.join("scripts").exists(), "scripts/ should not exist");
+    }
+
+    #[test]
+    fn init_does_not_overwrite_template_dirs() {
+        let parent = tempdir().unwrap();
+        let dir = parent.path().join("code-skill-scaffold");
+        // CodeSkill template creates scripts/run.sh
+        init_skill(&dir, SkillTemplate::CodeSkill, false).unwrap();
+        // scripts/ should exist (from template), but no .gitkeep since dir already populated
+        assert!(dir.join("scripts").is_dir());
+        assert!(dir.join("scripts/run.sh").exists());
+        // examples/ should be scaffolded since template didn't create it
+        assert!(dir.join("examples").is_dir());
+        assert!(dir.join("examples/.gitkeep").exists());
+    }
+
+    #[test]
+    fn build_creates_scaffolding_dirs_by_default() {
+        let parent = tempdir().unwrap();
+        let dir = parent.path().join("build-scaffold");
+        let spec = SkillSpec {
+            purpose: "Process PDF files".to_string(),
+            name: Some("build-scaffold".to_string()),
+            output_dir: Some(dir.clone()),
+            no_llm: true,
+            ..Default::default()
+        };
+        build_skill(&spec).unwrap();
+        assert!(dir.join("examples").is_dir());
+        assert!(dir.join("scripts").is_dir());
+    }
+
+    #[test]
+    fn build_minimal_skips_scaffolding() {
+        let parent = tempdir().unwrap();
+        let dir = parent.path().join("build-minimal");
+        let spec = SkillSpec {
+            purpose: "Process PDF files".to_string(),
+            name: Some("build-minimal".to_string()),
+            output_dir: Some(dir.clone()),
+            no_llm: true,
+            minimal: true,
+            ..Default::default()
+        };
+        build_skill(&spec).unwrap();
+        assert!(!dir.join("examples").exists());
+        assert!(!dir.join("scripts").exists());
     }
 
     // ── build_skill tests (30-38) ─────────────────────────────────────
@@ -683,6 +788,7 @@ mod tests {
             license: Some("MIT".to_string()),
             output_dir: Some(dir),
             no_llm: true,
+            minimal: false,
             extra_files: None,
             template: SkillTemplate::Minimal,
         };
@@ -786,14 +892,15 @@ mod tests {
         };
         let result = build_skill(&spec);
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
+        let err = result.unwrap_err();
         assert!(
-            err.contains("SKILL.md already exists"),
-            "error should say 'SKILL.md already exists': {err}"
+            matches!(err, AigentError::AlreadyExists { .. }),
+            "expected AlreadyExists variant, got: {err}"
         );
+        let msg = err.to_string();
         assert!(
-            err.contains(&dir.join("SKILL.md").display().to_string()),
-            "error should contain the file path: {err}"
+            msg.contains(&dir.join("SKILL.md").display().to_string()),
+            "error should contain the file path: {msg}"
         );
     }
 
@@ -803,16 +910,17 @@ mod tests {
         let dir = parent.path().join("toctou-init");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("SKILL.md"), "---\nname: x\n---\n").unwrap();
-        let result = init_skill(&dir, SkillTemplate::Minimal);
+        let result = init_skill(&dir, SkillTemplate::Minimal, false);
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
+        let err = result.unwrap_err();
         assert!(
-            err.contains("SKILL.md already exists"),
-            "error should say 'SKILL.md already exists': {err}"
+            matches!(err, AigentError::AlreadyExists { .. }),
+            "expected AlreadyExists variant, got: {err}"
         );
+        let msg = err.to_string();
         assert!(
-            err.contains(&dir.join("SKILL.md").display().to_string()),
-            "error should contain the file path: {err}"
+            msg.contains(&dir.join("SKILL.md").display().to_string()),
+            "error should contain the file path: {msg}"
         );
     }
 
@@ -845,7 +953,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let original = "---\nname: original\n---\nOriginal content\n";
         std::fs::write(dir.join("SKILL.md"), original).unwrap();
-        let _ = init_skill(&dir, SkillTemplate::Minimal);
+        let _ = init_skill(&dir, SkillTemplate::Minimal, false);
         let content = std::fs::read_to_string(dir.join("SKILL.md")).unwrap();
         assert_eq!(
             content, original,

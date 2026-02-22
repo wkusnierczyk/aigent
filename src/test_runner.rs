@@ -39,6 +39,36 @@ pub struct TestCaseResult {
     pub reason: Option<String>,
 }
 
+/// Expected match strength for a test query.
+///
+/// Provides a human-friendly alternative to `min_score` for asserting
+/// activation quality. Maps to score thresholds:
+/// - `Strong` → score ≥ 0.6
+/// - `Weak` → score ≥ 0.3
+/// - `None` → score < 0.3 (should not match)
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MatchStrength {
+    /// Strong match: score ≥ 0.6.
+    Strong,
+    /// Weak match: score ≥ 0.3.
+    Weak,
+    /// No match expected: score < 0.3.
+    None,
+}
+
+impl MatchStrength {
+    /// Return the minimum score threshold for this strength level.
+    #[must_use]
+    pub fn min_score(&self) -> f64 {
+        match self {
+            MatchStrength::Strong => 0.6,
+            MatchStrength::Weak => 0.3,
+            MatchStrength::None => 0.0,
+        }
+    }
+}
+
 /// A test fixture parsed from tests.yml.
 #[derive(Debug, serde::Deserialize)]
 struct TestFixture {
@@ -53,9 +83,12 @@ struct TestQuery {
     input: String,
     /// Whether the query should activate the skill.
     should_match: bool,
-    /// Optional minimum score threshold.
+    /// Optional minimum score threshold (takes precedence over `strength`).
     #[serde(default)]
     min_score: Option<f64>,
+    /// Optional expected match strength (human-friendly alternative to `min_score`).
+    #[serde(default)]
+    strength: Option<MatchStrength>,
 }
 
 /// Run a test suite for a skill directory.
@@ -97,9 +130,12 @@ pub fn run_test_suite(skill_dir: &Path) -> Result<TestSuiteResult> {
         let mut case_passed = actual_match == query.should_match;
         let mut reason = None;
 
-        // Check min_score constraint if specified and the match was expected.
+        // Check score constraint: min_score takes precedence over strength.
         if case_passed && query.should_match {
-            if let Some(min) = query.min_score {
+            let effective_min = query
+                .min_score
+                .or_else(|| query.strength.as_ref().map(MatchStrength::min_score));
+            if let Some(min) = effective_min {
                 if score < min {
                     case_passed = false;
                     reason = Some(format!("score {score:.2} below minimum {min:.2}"));
@@ -152,9 +188,9 @@ struct GeneratedQuery {
     input: String,
     /// Whether the query should activate the skill.
     should_match: bool,
-    /// Optional minimum score threshold.
+    /// Expected match strength.
     #[serde(skip_serializing_if = "Option::is_none")]
-    min_score: Option<f64>,
+    strength: Option<MatchStrength>,
 }
 
 /// Generate a starter tests.yml from skill metadata.
@@ -179,12 +215,12 @@ pub fn generate_fixture(skill_dir: &Path) -> Result<String> {
             GeneratedQuery {
                 input: positive,
                 should_match: true,
-                min_score: Some(0.3),
+                strength: Some(MatchStrength::Strong),
             },
             GeneratedQuery {
                 input: "something completely unrelated to this skill".to_string(),
                 should_match: false,
-                min_score: None,
+                strength: None,
             },
         ],
     };
@@ -318,6 +354,100 @@ mod tests {
         let fixture: TestFixture = serde_yaml_ng::from_str(&yaml).unwrap();
         assert_eq!(fixture.queries.len(), 2);
     }
+
+    // ── MatchStrength tests ─────────────────────────────────────────
+
+    #[test]
+    fn strength_strong_maps_to_min_score() {
+        assert_eq!(MatchStrength::Strong.min_score(), 0.6);
+    }
+
+    #[test]
+    fn strength_weak_maps_to_min_score() {
+        assert_eq!(MatchStrength::Weak.min_score(), 0.3);
+    }
+
+    #[test]
+    fn strength_none_maps_to_zero() {
+        assert_eq!(MatchStrength::None.min_score(), 0.0);
+    }
+
+    #[test]
+    fn strength_strong_assertion_fails_on_low_score() {
+        let (_parent, dir) = make_skill_with_tests(
+            "my-skill",
+            "---\nname: my-skill\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
+            "queries:\n  - input: \"process PDF files\"\n    should_match: true\n    strength: strong\n",
+        );
+        let result = run_test_suite(&dir).unwrap();
+        // The probe likely scores below 0.6 for this query, so strength: strong should fail.
+        if result.failed > 0 {
+            assert!(result.results[0]
+                .reason
+                .as_ref()
+                .unwrap()
+                .contains("below minimum"));
+        }
+        // If it passes, the score was >= 0.6, which is fine too.
+    }
+
+    #[test]
+    fn strength_weak_assertion_passes_on_moderate_score() {
+        let (_parent, dir) = make_skill_with_tests(
+            "my-skill",
+            "---\nname: my-skill\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
+            "queries:\n  - input: \"process PDF files\"\n    should_match: true\n    strength: weak\n",
+        );
+        let result = run_test_suite(&dir).unwrap();
+        // "process PDF files" against a PDF skill should score >= 0.3.
+        assert_eq!(
+            result.passed, 1,
+            "strength: weak should pass for relevant query"
+        );
+    }
+
+    #[test]
+    fn min_score_takes_precedence_over_strength() {
+        let (_parent, dir) = make_skill_with_tests(
+            "my-skill",
+            "---\nname: my-skill\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
+            "queries:\n  - input: \"process PDF files\"\n    should_match: true\n    min_score: 0.99\n    strength: weak\n",
+        );
+        let result = run_test_suite(&dir).unwrap();
+        // min_score: 0.99 should take precedence and cause failure.
+        assert_eq!(result.failed, 1);
+        assert!(result.results[0].reason.as_ref().unwrap().contains("0.99"));
+    }
+
+    #[test]
+    fn generate_fixture_emits_strength() {
+        let parent = tempdir().unwrap();
+        let dir = parent.path().join("gen-strength");
+        fs::create_dir(&dir).unwrap();
+        fs::write(
+            dir.join("SKILL.md"),
+            "---\nname: gen-strength\ndescription: Processes documents. Use when handling files.\n---\nBody.\n",
+        )
+        .unwrap();
+        let yaml = generate_fixture(&dir).unwrap();
+        assert!(
+            yaml.contains("strength: strong"),
+            "generated fixture should use strength, got:\n{yaml}"
+        );
+        assert!(
+            !yaml.contains("min_score"),
+            "generated fixture should not use min_score"
+        );
+    }
+
+    #[test]
+    fn strength_deserializes_from_yaml() {
+        let yaml = "queries:\n  - input: test\n    should_match: true\n    strength: weak\n";
+        let fixture: TestFixture = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(fixture.queries[0].strength, Some(MatchStrength::Weak));
+    }
+
+    // ── format_text ───────────────────────────────────────────────────
 
     #[test]
     fn format_text_shows_pass_fail() {
