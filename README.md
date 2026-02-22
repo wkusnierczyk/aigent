@@ -458,8 +458,9 @@ Full API documentation is available at [docs.rs/aigent](https://docs.rs/aigent).
 
 > **Note**
 > When no path is given, the current directory is used. This lets you run
-> `aigent validate`, `aigent format --check`, etc. from inside a skill directory
-> without specifying a path.
+> `aigent validate`, `aigent format --check`, etc. without specifying a path
+> when the current directory contains a `SKILL.md` file. The tool does not
+> search parent directories.
 
 > **Note**
 > Backward compatibility: The following old command names are available as hidden
