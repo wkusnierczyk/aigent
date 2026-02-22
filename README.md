@@ -1002,10 +1002,8 @@ validate + lint and optionally fixes errors before analysing upgrades.
 ```
 $ aigent upgrade skills/aigent-validator
 Missing 'compatibility' field — recommended for multi-platform skills.
-Missing 'metadata.version' — recommended for tracking skill versions.
-Missing 'metadata.author' — recommended for attribution.
 
-Run with --apply to apply 3 suggestion(s).
+Run with --apply to apply 1 suggestion(s).
 ```
 
 ```

@@ -1315,7 +1315,7 @@ fn upgrade_detects_missing_trigger_phrase() {
 fn upgrade_clean_skill_no_suggestions() {
     let (_parent, dir) = make_skill_dir(
         "upgrade-clean",
-        "---\nname: upgrade-clean\ndescription: >-\n  Manages user sessions. Use when handling authentication.\ncompatibility: claude-code\nmetadata:\n  version: '1.0.0'\n  author: test\n---\nBody.\n",
+        "---\nname: upgrade-clean\ndescription: >-\n  Manages user sessions. Use when handling authentication.\ncompatibility: claude-code\n---\nBody.\n",
     );
     aigent()
         .args(["upgrade", dir.to_str().unwrap()])
@@ -1351,8 +1351,7 @@ fn upgrade_full_reports_suggestions() {
         .args(["upgrade", dir.to_str().unwrap(), "--full"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("compatibility"))
-        .stderr(predicate::str::contains("metadata"));
+        .stderr(predicate::str::contains("compatibility"));
 }
 
 #[test]
@@ -1371,93 +1370,28 @@ fn upgrade_full_apply_fixes_then_upgrades() {
     assert!(content.contains("compatibility"));
 }
 
-// ── M13: YAML parser edge cases (#81) ────────────────────────────
-
 #[test]
-fn upgrade_apply_preserves_existing_metadata_keys() {
-    // Skill has metadata.version but NOT metadata.author — apply should add only author.
+fn upgrade_apply_does_not_regress_score() {
+    // Regression test for #143: upgrade --apply should not add fields that
+    // cause score to drop.
     let (_parent, dir) = make_skill_dir(
-        "upgrade-partial-meta",
-        "---\nname: upgrade-partial-meta\ndescription: A basic skill\nmetadata:\n  version: '1.0.0'\n---\nBody.\n",
-    );
-    aigent()
-        .args(["upgrade", dir.to_str().unwrap(), "--apply"])
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("Applied"));
-    let content = fs::read_to_string(dir.join("SKILL.md")).unwrap();
-    // version should still be there (preserved).
-    assert!(content.contains("version: '1.0.0'"));
-    // author should have been added.
-    assert!(content.contains("author: unknown"));
-    // Should still be valid YAML after modifications.
-    aigent()
-        .args(["validate", dir.to_str().unwrap()])
-        .assert()
-        .success();
-}
-
-#[test]
-fn upgrade_apply_respects_four_space_indentation() {
-    // Skill uses 4-space indentation — upgrade should detect and use 4 spaces.
-    let (_parent, dir) = make_skill_dir(
-        "upgrade-4sp-indent",
-        "---\nname: upgrade-4sp-indent\ndescription: A basic skill\nmetadata:\n    version: '1.0.0'\n---\nBody.\n",
+        "upgrade-score-regress",
+        "---\nname: upgrade-score-regress\ndescription: A basic skill\n---\nBody.\n",
     );
     aigent()
         .args(["upgrade", dir.to_str().unwrap(), "--apply"])
         .assert()
         .success();
-    let content = fs::read_to_string(dir.join("SKILL.md")).unwrap();
-    // The added author should use 4-space indentation to match existing style.
+    // Score after upgrade must not contain "Unknown fields found".
+    let output = aigent()
+        .args(["score", dir.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        content.contains("    author: unknown"),
-        "Expected 4-space indented author line, got:\n{content}"
+        !stderr.contains("Unknown fields found"),
+        "upgrade --apply should not introduce unknown fields:\n{stderr}",
     );
-}
-
-#[test]
-fn upgrade_apply_with_comments_in_frontmatter() {
-    // Frontmatter has comment lines — the parser should skip them when locating metadata.
-    let (_parent, dir) = make_skill_dir(
-        "upgrade-comments",
-        "---\n# This is a comment\nname: upgrade-comments\ndescription: A basic skill\n# Another comment\nmetadata:\n  version: '1.0.0'\n---\nBody.\n",
-    );
-    aigent()
-        .args(["upgrade", dir.to_str().unwrap(), "--apply"])
-        .assert()
-        .success();
-    let content = fs::read_to_string(dir.join("SKILL.md")).unwrap();
-    // Comments should be preserved.
-    assert!(content.contains("# This is a comment"));
-    assert!(content.contains("# Another comment"));
-    // author should have been inserted.
-    assert!(content.contains("author: unknown"));
-}
-
-#[test]
-fn upgrade_apply_no_metadata_block_creates_one() {
-    // Skill has no metadata block at all — apply should add the whole block.
-    let (_parent, dir) = make_skill_dir(
-        "upgrade-no-meta",
-        "---\nname: upgrade-no-meta\ndescription: A basic skill\n---\nBody.\n",
-    );
-    aigent()
-        .args(["upgrade", dir.to_str().unwrap(), "--apply"])
-        .assert()
-        .success();
-    let content = fs::read_to_string(dir.join("SKILL.md")).unwrap();
-    // Should create a metadata block with both version and author.
-    assert!(content.contains("metadata:"));
-    assert!(content.contains("version: '0.1.0'"));
-    assert!(content.contains("author: unknown"));
-    // Should also add compatibility.
-    assert!(content.contains("compatibility: claude-code"));
-    // The resulting file should still be valid.
-    aigent()
-        .args(["validate", dir.to_str().unwrap()])
-        .assert()
-        .success();
 }
 
 // ── M13: CLI renames and aliases (#76) ───────────────────────────

@@ -1432,62 +1432,6 @@ fn extract_frontmatter_lines(content: &str) -> Vec<String> {
         .collect()
 }
 
-/// Detect the indentation style used in frontmatter lines.
-///
-/// Scans for the first indented line and returns its leading spaces.
-/// Defaults to "  " (2 spaces) if no indented lines are found.
-/// Note: YAML forbids tabs for indentation, so only spaces are considered.
-fn detect_indent(lines: &[String]) -> String {
-    for line in lines {
-        if line.starts_with(' ') {
-            let indent: String = line.chars().take_while(|c| *c == ' ').collect();
-            return indent;
-        }
-    }
-    "  ".to_string() // default: 2 spaces
-}
-
-/// Find the insertion position for new metadata keys.
-///
-/// Locates the `metadata:` line (not in a comment) and returns the index
-/// after the last indented child key beneath it.
-fn find_metadata_insert_position(lines: &[String]) -> usize {
-    let mut meta_line_idx = None;
-
-    for (i, line) in lines.iter().enumerate() {
-        let trimmed = line.trim();
-        // Skip comment lines.
-        if trimmed.starts_with('#') {
-            continue;
-        }
-        // Match `metadata:` as a top-level key (not indented).
-        if trimmed.starts_with("metadata:") && !line.starts_with(' ') {
-            meta_line_idx = Some(i);
-            break;
-        }
-    }
-
-    if let Some(idx) = meta_line_idx {
-        // Walk forward from metadata: to find the last indented child line.
-        let mut last_child = idx;
-        for (i, line) in lines.iter().enumerate().skip(idx + 1) {
-            if line.is_empty() || line.starts_with(' ') {
-                // Still inside the metadata block (indented or blank).
-                if !line.trim().is_empty() {
-                    last_child = i;
-                }
-            } else {
-                // Hit a non-indented line — end of metadata block.
-                break;
-            }
-        }
-        last_child + 1
-    } else {
-        // Fallback: insert at the end.
-        lines.len()
-    }
-}
-
 /// Run upgrade analysis on a skill directory.
 ///
 /// Checks for missing best-practice fields and returns a list of human-readable
@@ -1552,41 +1496,6 @@ fn run_upgrade(
         );
     }
 
-    // The parser stores the YAML `metadata:` block as a key named "metadata"
-    // inside the extra-fields HashMap. So metadata.version becomes
-    // props.metadata["metadata"]["version"].
-    let meta_block = props
-        .metadata
-        .as_ref()
-        .and_then(|m| m.get("metadata"))
-        .and_then(|v| {
-            if let serde_yaml_ng::Value::Mapping(map) = v {
-                Some(map.clone())
-            } else {
-                None
-            }
-        });
-
-    // Check for missing metadata.version.
-    let has_version = meta_block
-        .as_ref()
-        .and_then(|m| m.get(serde_yaml_ng::Value::String("version".to_string())))
-        .is_some();
-    if !has_version {
-        suggestions.push(
-            "Missing 'metadata.version' — recommended for tracking skill versions.".to_string(),
-        );
-    }
-
-    // Check for missing metadata.author.
-    let has_author = meta_block
-        .as_ref()
-        .and_then(|m| m.get(serde_yaml_ng::Value::String("author".to_string())))
-        .is_some();
-    if !has_author {
-        suggestions.push("Missing 'metadata.author' — recommended for attribution.".to_string());
-    }
-
     // Check for missing trigger phrase in description.
     let desc_lower = props.description.to_lowercase();
     if !desc_lower.contains("use when") && !desc_lower.contains("use this when") {
@@ -1616,37 +1525,6 @@ fn run_upgrade(
                     // Append compatibility if missing.
                     if props.compatibility.is_none() && !raw_map.contains_key("compatibility") {
                         updated_lines.push("compatibility: claude-code".to_string());
-                    }
-
-                    // Insert metadata keys.
-                    if !has_version || !has_author {
-                        if meta_block.is_none() {
-                            // No metadata block — append entire block.
-                            updated_lines.push("metadata:".to_string());
-                            let indent = detect_indent(&front_lines);
-                            if !has_version {
-                                updated_lines.push(format!("{indent}version: '0.1.0'"));
-                            }
-                            if !has_author {
-                                updated_lines.push(format!("{indent}author: unknown"));
-                            }
-                        } else {
-                            // Partial metadata — find the metadata: line and insert after
-                            // the last existing child key under it.
-                            let indent = detect_indent(&front_lines);
-                            let insert_pos = find_metadata_insert_position(&updated_lines);
-                            let mut to_insert = Vec::new();
-                            if !has_version {
-                                to_insert.push(format!("{indent}version: '0.1.0'"));
-                            }
-                            if !has_author {
-                                to_insert.push(format!("{indent}author: unknown"));
-                            }
-                            // Insert after the last metadata child, in reverse to maintain order.
-                            for (i, line) in to_insert.into_iter().enumerate() {
-                                updated_lines.insert(insert_pos + i, line);
-                            }
-                        }
                     }
 
                     let updated_yaml = updated_lines.join("\n");
