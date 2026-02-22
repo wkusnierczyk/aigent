@@ -6,6 +6,9 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::tempdir;
 
+/// Pattern that matches a standalone "ok" line in CLI output.
+const OK_LINE: &str = r"(?m)^\s*ok\s*$";
+
 /// Return a `Command` for the `aigent` binary built by Cargo.
 fn aigent() -> Command {
     cargo_bin_cmd!("aigent")
@@ -75,7 +78,7 @@ fn validate_valid_skill() {
         .args(["validate", dir.to_str().unwrap()])
         .assert()
         .success()
-        .stderr(predicate::str::is_match(r"(?m)^ok\r?$").unwrap());
+        .stderr(predicate::str::is_match(OK_LINE).unwrap());
 }
 
 #[test]
@@ -125,7 +128,7 @@ fn validate_skill_md_file_path() {
         .args(["validate", skill_md.to_str().unwrap()])
         .assert()
         .success()
-        .stderr(predicate::str::is_match(r"(?m)^ok\r?$").unwrap());
+        .stderr(predicate::str::is_match(OK_LINE).unwrap());
 }
 
 // ── properties ──────────────────────────────────────────────────────
@@ -384,7 +387,7 @@ fn validate_format_text_default() {
         .args(["validate", dir.to_str().unwrap(), "--format", "text"])
         .assert()
         .success()
-        .stderr(predicate::str::is_match(r"(?m)^ok\r?$").unwrap());
+        .stderr(predicate::str::is_match(OK_LINE).unwrap());
 }
 
 #[test]
@@ -478,7 +481,7 @@ fn validate_target_claude_code_accepts_extension_fields() {
         .args(["validate", dir.to_str().unwrap(), "--target", "claude-code"])
         .assert()
         .success()
-        .stderr(predicate::str::is_match(r"(?m)^ok\r?$").unwrap());
+        .stderr(predicate::str::is_match(OK_LINE).unwrap());
 }
 
 #[test]
@@ -491,7 +494,7 @@ fn validate_target_permissive_no_unknown_field_warnings() {
         .args(["validate", dir.to_str().unwrap(), "--target", "permissive"])
         .assert()
         .success()
-        .stderr(predicate::str::is_match(r"(?m)^ok\r?$").unwrap());
+        .stderr(predicate::str::is_match(OK_LINE).unwrap());
 }
 
 // ── check command (validate + semantic) ───────────────────────────
@@ -570,7 +573,7 @@ fn check_perfect_skill_no_output() {
         .args(["check", dir.to_str().unwrap()])
         .assert()
         .success()
-        .stderr(predicate::str::is_match(r"(?m)^ok\r?$").unwrap());
+        .stderr(predicate::str::is_match(OK_LINE).unwrap());
 }
 
 #[test]
@@ -1071,7 +1074,7 @@ fn validate_structure_clean_skill_no_warnings() {
         .args(["validate", dir.to_str().unwrap(), "--structure"])
         .assert()
         .success()
-        .stderr(predicate::str::is_match(r"(?m)^ok\r?$").unwrap());
+        .stderr(predicate::str::is_match(OK_LINE).unwrap());
 }
 
 // ── M12: doc subcommand ──────────────────────────────────────────
