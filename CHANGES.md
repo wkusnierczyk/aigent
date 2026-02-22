@@ -1,5 +1,9 @@
 # Changes
 
+## [0.6.1] — 2026-02-22
+
+- Migrate license from MIT to Apache 2.0 (#133)
+
 ## [0.6.0] — 2026-02-22
 
 - M15: Plugin component validation (#130)
