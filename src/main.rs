@@ -81,7 +81,8 @@ impl From<PromptOutputFormat> for aigent::prompt::PromptFormat {
 enum Commands {
     /// Validate skill directories (spec conformance)
     Validate {
-        /// Paths to skill directories or SKILL.md files
+        /// Paths to skill directories or SKILL.md files [default: .]
+        #[arg(default_value = ".")]
         skill_dirs: Vec<PathBuf>,
         /// Output format
         #[arg(long, value_enum, default_value_t = Format::Text)]
@@ -105,7 +106,8 @@ enum Commands {
     /// Run validate + semantic quality checks (superset of validate)
     #[command(alias = "lint")]
     Check {
-        /// Paths to skill directories or SKILL.md files
+        /// Paths to skill directories or SKILL.md files [default: .]
+        #[arg(default_value = ".")]
         skill_dirs: Vec<PathBuf>,
         /// Output format
         #[arg(long, value_enum, default_value_t = Format::Text)]
@@ -129,14 +131,15 @@ enum Commands {
     /// Read skill properties as JSON
     #[command(alias = "read-properties")]
     Properties {
-        /// Path to skill directory or SKILL.md file
-        #[arg(name = "skill-dir")]
+        /// Path to skill directory or SKILL.md file [default: .]
+        #[arg(name = "skill-dir", default_value = ".")]
         skill_dir: PathBuf,
     },
     /// Generate prompt from skill directories
     #[command(alias = "to-prompt")]
     Prompt {
-        /// Paths to skill directories
+        /// Paths to skill directories [default: .]
+        #[arg(default_value = ".")]
         skill_dirs: Vec<PathBuf>,
         /// Output format
         #[arg(long, value_enum, default_value_t = PromptOutputFormat::Xml)]
@@ -168,8 +171,8 @@ enum Commands {
     },
     /// Score a skill against best-practices checklist
     Score {
-        /// Path to skill directory or SKILL.md file
-        #[arg(name = "skill-dir")]
+        /// Path to skill directory or SKILL.md file [default: .]
+        #[arg(name = "skill-dir", default_value = ".")]
         skill_dir: PathBuf,
         /// Output format
         #[arg(long, value_enum, default_value_t = Format::Text)]
@@ -177,7 +180,8 @@ enum Commands {
     },
     /// Generate a markdown skill catalog
     Doc {
-        /// Paths to skill directories
+        /// Paths to skill directories [default: .]
+        #[arg(default_value = ".")]
         skill_dirs: Vec<PathBuf>,
         /// Write output to file instead of stdout
         #[arg(long)]
@@ -186,13 +190,13 @@ enum Commands {
         #[arg(long)]
         recursive: bool,
     },
-    /// Probe a skill's activation surface with a sample query
+    /// Probe skill activation against a sample query
     Probe {
-        /// Path to skill directory or SKILL.md file
-        #[arg(name = "skill-dir")]
-        skill_dir: PathBuf,
+        /// Paths to skill directories or SKILL.md files [default: .]
+        #[arg(default_value = ".")]
+        skill_dirs: Vec<PathBuf>,
         /// Sample user query to test activation against
-        #[arg(name = "query")]
+        #[arg(long, short)]
         query: String,
         /// Output format
         #[arg(long, value_enum, default_value_t = Format::Text)]
@@ -200,7 +204,8 @@ enum Commands {
     },
     /// Assemble skills into a Claude Code plugin
     Build {
-        /// Paths to skill directories
+        /// Paths to skill directories [default: .]
+        #[arg(default_value = ".")]
         skill_dirs: Vec<PathBuf>,
         /// Output directory for the assembled plugin
         #[arg(long, default_value = "./dist")]
@@ -214,7 +219,8 @@ enum Commands {
     },
     /// Run fixture-based test suite from tests.yml
     Test {
-        /// Paths to skill directories
+        /// Paths to skill directories [default: .]
+        #[arg(default_value = ".")]
         skill_dirs: Vec<PathBuf>,
         /// Output format
         #[arg(long, value_enum, default_value_t = Format::Text)]
@@ -228,8 +234,8 @@ enum Commands {
     },
     /// Check a skill for upgrade opportunities
     Upgrade {
-        /// Path to skill directory or SKILL.md file
-        #[arg(name = "skill-dir")]
+        /// Path to skill directory or SKILL.md file [default: .]
+        #[arg(name = "skill-dir", default_value = ".")]
         skill_dir: PathBuf,
         /// Apply automatic upgrades
         #[arg(long)]
@@ -244,7 +250,8 @@ enum Commands {
     /// Format SKILL.md files (canonical key order, clean whitespace)
     #[command(alias = "format")]
     Fmt {
-        /// Paths to skill directories or SKILL.md files
+        /// Paths to skill directories or SKILL.md files [default: .]
+        #[arg(default_value = ".")]
         skill_dirs: Vec<PathBuf>,
         /// Check formatting without modifying files (exit 1 if unformatted)
         #[arg(long)]
@@ -738,36 +745,65 @@ fn main() {
             }
         }
         Some(Commands::Probe {
-            skill_dir,
+            skill_dirs,
             query,
             format,
         }) => {
-            let dir = resolve_skill_dir(&skill_dir);
-            match aigent::test_skill(&dir, &query) {
-                Ok(result) => match format {
-                    Format::Text => {
-                        print!("{}", aigent::tester::format_test_result(&result));
+            let dirs: Vec<PathBuf> = skill_dirs.iter().map(|p| resolve_skill_dir(p)).collect();
+            let mut results = Vec::new();
+            let mut had_errors = false;
+            for dir in &dirs {
+                match aigent::test_skill(dir, &query) {
+                    Ok(result) => results.push(result),
+                    Err(e) => {
+                        eprintln!("aigent probe: {}: {e}", dir.display());
+                        had_errors = true;
                     }
-                    Format::Json => {
-                        let json = serde_json::json!({
-                            "name": result.name,
-                            "query": result.query,
-                            "description": result.description,
-                            "activation": format!("{:?}", result.query_match),
-                            "estimated_tokens": result.estimated_tokens,
-                            "validation_errors": result.diagnostics.iter()
-                                .filter(|d| d.is_error()).count(),
-                            "validation_warnings": result.diagnostics.iter()
-                                .filter(|d| d.is_warning()).count(),
-                            "structure_issues": result.structure_diagnostics.len(),
-                        });
+                }
+            }
+            // Sort by score descending (best match first)
+            results.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            match format {
+                Format::Text => {
+                    for (i, result) in results.iter().enumerate() {
+                        if i > 0 {
+                            println!();
+                        }
+                        print!("{}", aigent::tester::format_test_result(result));
+                    }
+                }
+                Format::Json => {
+                    let json: Vec<_> = results
+                        .iter()
+                        .map(|result| {
+                            serde_json::json!({
+                                "name": result.name,
+                                "query": result.query,
+                                "description": result.description,
+                                "activation": format!("{:?}", result.query_match),
+                                "score": result.score,
+                                "estimated_tokens": result.estimated_tokens,
+                                "validation_errors": result.diagnostics.iter()
+                                    .filter(|d| d.is_error()).count(),
+                                "validation_warnings": result.diagnostics.iter()
+                                    .filter(|d| d.is_warning()).count(),
+                                "structure_issues": result.structure_diagnostics.len(),
+                            })
+                        })
+                        .collect();
+                    if json.len() == 1 {
+                        println!("{}", serde_json::to_string_pretty(&json[0]).unwrap());
+                    } else {
                         println!("{}", serde_json::to_string_pretty(&json).unwrap());
                     }
-                },
-                Err(e) => {
-                    eprintln!("aigent probe: {e}");
-                    std::process::exit(1);
                 }
+            }
+            if had_errors && results.is_empty() {
+                std::process::exit(1);
             }
         }
         Some(Commands::Build {

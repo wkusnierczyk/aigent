@@ -153,7 +153,11 @@ aigent init my-skill/
 # Create a skill from a description
 aigent new "Process PDF files and extract text" --no-llm
 
-# Validate a skill directory (spec conformance)
+# Validate (from inside a skill directory — path defaults to .)
+cd my-skill/
+aigent validate --structure
+
+# Or specify a path explicitly
 aigent validate my-skill/ --structure
 
 # Run validate + semantic quality checks
@@ -166,7 +170,7 @@ aigent score my-skill/
 aigent format my-skill/
 
 # Probe skill activation against a query
-aigent probe my-skill/ "process PDF files"
+aigent probe my-skill/ --query "process PDF files"
 
 # Run fixture-based test suite
 aigent test my-skill/
@@ -437,20 +441,26 @@ Full API documentation is available at [docs.rs/aigent](https://docs.rs/aigent).
 
 <table>
 <tr><th width="280">Command</th><th>Description</th></tr>
-<tr><td><code>build &lt;dirs...&gt;</code></td><td>Assemble skills into a Claude Code plugin</td></tr>
-<tr><td><code>check &lt;dirs...&gt;</code></td><td>Run validate + semantic lint checks (superset of <code>validate</code>)</td></tr>
-<tr><td><code>doc &lt;dirs...&gt;</code></td><td>Generate a markdown skill catalog</td></tr>
-<tr><td><code>format &lt;dirs...&gt;</code></td><td>Format <code>SKILL.md</code> files (canonical key order, clean whitespace)</td></tr>
+<tr><td><code>build [dirs...]</code></td><td>Assemble skills into a Claude Code plugin</td></tr>
+<tr><td><code>check [dirs...]</code></td><td>Run validate + semantic lint checks (superset of <code>validate</code>)</td></tr>
+<tr><td><code>doc [dirs...]</code></td><td>Generate a markdown skill catalog</td></tr>
+<tr><td><code>format [dirs...]</code></td><td>Format <code>SKILL.md</code> files (canonical key order, clean whitespace)</td></tr>
 <tr><td><code>init [directory]</code></td><td>Create a template <code>SKILL.md</code></td></tr>
 <tr><td><code>new &lt;purpose&gt;</code></td><td>Create a skill from natural language</td></tr>
-<tr><td><code>probe &lt;directory&gt; &lt;query&gt;</code></td><td>Probe skill activation against a sample user query</td></tr>
-<tr><td><code>prompt &lt;dirs...&gt;</code></td><td>Generate <code>&lt;available_skills&gt;</code> XML block</td></tr>
-<tr><td><code>properties &lt;directory&gt;</code></td><td>Output skill properties as JSON</td></tr>
-<tr><td><code>score &lt;directory&gt;</code></td><td>Score a skill against best-practices checklist (0–100)</td></tr>
-<tr><td><code>test &lt;dirs...&gt;</code></td><td>Run fixture-based test suites from <code>tests.yml</code></td></tr>
-<tr><td><code>upgrade &lt;directory&gt;</code></td><td>Check a skill for upgrade opportunities</td></tr>
-<tr><td><code>validate &lt;dirs...&gt;</code></td><td>Validate skill directories against the specification</td></tr>
+<tr><td><code>probe [dirs...] --query &lt;query&gt;</code></td><td>Probe skill activation against a sample user query</td></tr>
+<tr><td><code>prompt [dirs...]</code></td><td>Generate <code>&lt;available_skills&gt;</code> XML block</td></tr>
+<tr><td><code>properties [directory]</code></td><td>Output skill properties as JSON</td></tr>
+<tr><td><code>score [directory]</code></td><td>Score a skill against best-practices checklist (0–100)</td></tr>
+<tr><td><code>test [dirs...]</code></td><td>Run fixture-based test suites from <code>tests.yml</code></td></tr>
+<tr><td><code>upgrade [directory]</code></td><td>Check a skill for upgrade opportunities</td></tr>
+<tr><td><code>validate [dirs...]</code></td><td>Validate skill directories against the specification</td></tr>
 </table>
+
+> **Note**
+> When no path is given, the current directory is used. This lets you run
+> `aigent validate`, `aigent format --check`, etc. without specifying a path
+> when the current directory contains a `SKILL.md` file. The tool does not
+> search parent directories.
 
 > **Note**
 > Backward compatibility: The following old command names are available as hidden
@@ -462,7 +472,6 @@ Full API documentation is available at [docs.rs/aigent](https://docs.rs/aigent).
 > | `fmt` | `format` |
 > | `lint` | `check` |
 > | `read-properties` | `properties` |
-> | `test <dir> <query>` | `probe` |
 > | `to-prompt` | `prompt` |
 
 ### Exit codes
@@ -478,7 +487,7 @@ what "success" means for each command.
 | `format` | All files already formatted | Files were reformatted (with `--check`) or error |
 | `init` | Template created | Directory already exists or I/O error |
 | `new` | Skill created | Build error |
-| `probe` | Always (result printed) | Parse or I/O error |
+| `probe` | At least one result printed | All directories failed to parse |
 | `prompt` | Prompt generated | No valid skills found |
 | `properties` | Properties printed | Parse error |
 | `score` | Perfect score (100/100) | Score below 100 |
@@ -533,6 +542,16 @@ Create a skill from natural language.
 <tr><td><code>--interactive, -i</code></td><td>Step-by-step confirmation mode</td></tr>
 <tr><td><code>--name &lt;name&gt;</code></td><td>Override the derived skill name</td></tr>
 <tr><td><code>--no-llm</code></td><td>Force deterministic mode (no LLM)</td></tr>
+</table>
+
+#### `probe` flags
+
+Probe skill activation against a sample user query.
+
+<table>
+<tr><th width="280">Flag</th><th>Description</th></tr>
+<tr><td><code>--query, -q &lt;query&gt;</code></td><td>Sample user query to test activation against (required)</td></tr>
+<tr><td><code>--format &lt;format&gt;</code></td><td>Output format: <code>text</code> or <code>json</code></td></tr>
 </table>
 
 #### `test` flags
@@ -755,7 +774,8 @@ Use this skill to Extract text from PDF files.
 
 Probes whether a skill's description would activate for a given user query.
 This is a dry-run of skill discovery — "if a user said *this*, would Claude
-pick up *that* skill?"
+pick up *that* skill?" Accepts multiple directories — results are ranked by
+match score (best first).
 
 Uses a **weighted formula** to compute a match score (0.0–1.0):
 - **0.5 × description overlap** — fraction of query tokens in description
@@ -769,8 +789,10 @@ Categories based on weighted score:
 
 Also reports estimated token cost and any validation issues.
 
+Single directory:
+
 ```
-$ aigent probe skills/aigent-validator "validate a skill"
+$ aigent probe skills/aigent-validator --query "validate a skill"
 Skill: aigent-validator
 Query: "validate a skill"
 Description: Validates AI agent skill definitions (SKILL.md files) against
@@ -783,11 +805,31 @@ Validation warnings (1):
   warning: unexpected metadata field: 'argument-hint'
 ```
 
+Multiple directories (results ranked by score, best first):
+
 ```
-$ aigent probe skills/aigent-validator "deploy kubernetes"
+$ aigent probe skills/* --query "validate a skill"
+Skill: aigent-validator
+...
+Activation: STRONG ✓ — description aligns well with query (score: 0.65)
+
+Skill: aigent-scorer
+...
+Activation: WEAK ⚠ — some overlap, but description may not trigger reliably (score: 0.25)
+
+Skill: aigent-builder
 ...
 Activation: NONE ✗ — description does not match the test query (score: 0.00)
-Token footprint: ~76 tokens
+```
+
+Default directory (from inside a skill directory):
+
+```
+$ cd skills/aigent-validator
+$ aigent probe --query "validate a skill"
+Skill: aigent-validator
+...
+Activation: STRONG ✓ — description aligns well with query (score: 0.65)
 ```
 
 #### `prompt` — Generate XML prompt block
