@@ -81,7 +81,8 @@ impl From<PromptOutputFormat> for aigent::prompt::PromptFormat {
 enum Commands {
     /// Validate skill directories (spec conformance)
     Validate {
-        /// Paths to skill directories or SKILL.md files
+        /// Paths to skill directories or SKILL.md files [default: .]
+        #[arg(default_value = ".")]
         skill_dirs: Vec<PathBuf>,
         /// Output format
         #[arg(long, value_enum, default_value_t = Format::Text)]
@@ -105,7 +106,8 @@ enum Commands {
     /// Run validate + semantic quality checks (superset of validate)
     #[command(alias = "lint")]
     Check {
-        /// Paths to skill directories or SKILL.md files
+        /// Paths to skill directories or SKILL.md files [default: .]
+        #[arg(default_value = ".")]
         skill_dirs: Vec<PathBuf>,
         /// Output format
         #[arg(long, value_enum, default_value_t = Format::Text)]
@@ -129,14 +131,15 @@ enum Commands {
     /// Read skill properties as JSON
     #[command(alias = "read-properties")]
     Properties {
-        /// Path to skill directory or SKILL.md file
-        #[arg(name = "skill-dir")]
+        /// Path to skill directory or SKILL.md file [default: .]
+        #[arg(name = "skill-dir", default_value = ".")]
         skill_dir: PathBuf,
     },
     /// Generate prompt from skill directories
     #[command(alias = "to-prompt")]
     Prompt {
-        /// Paths to skill directories
+        /// Paths to skill directories [default: .]
+        #[arg(default_value = ".")]
         skill_dirs: Vec<PathBuf>,
         /// Output format
         #[arg(long, value_enum, default_value_t = PromptOutputFormat::Xml)]
@@ -168,8 +171,8 @@ enum Commands {
     },
     /// Score a skill against best-practices checklist
     Score {
-        /// Path to skill directory or SKILL.md file
-        #[arg(name = "skill-dir")]
+        /// Path to skill directory or SKILL.md file [default: .]
+        #[arg(name = "skill-dir", default_value = ".")]
         skill_dir: PathBuf,
         /// Output format
         #[arg(long, value_enum, default_value_t = Format::Text)]
@@ -177,7 +180,8 @@ enum Commands {
     },
     /// Generate a markdown skill catalog
     Doc {
-        /// Paths to skill directories
+        /// Paths to skill directories [default: .]
+        #[arg(default_value = ".")]
         skill_dirs: Vec<PathBuf>,
         /// Write output to file instead of stdout
         #[arg(long)]
@@ -200,7 +204,8 @@ enum Commands {
     },
     /// Assemble skills into a Claude Code plugin
     Build {
-        /// Paths to skill directories
+        /// Paths to skill directories [default: .]
+        #[arg(default_value = ".")]
         skill_dirs: Vec<PathBuf>,
         /// Output directory for the assembled plugin
         #[arg(long, default_value = "./dist")]
@@ -214,7 +219,8 @@ enum Commands {
     },
     /// Run fixture-based test suite from tests.yml
     Test {
-        /// Paths to skill directories
+        /// Paths to skill directories [default: .]
+        #[arg(default_value = ".")]
         skill_dirs: Vec<PathBuf>,
         /// Output format
         #[arg(long, value_enum, default_value_t = Format::Text)]
@@ -228,8 +234,8 @@ enum Commands {
     },
     /// Check a skill for upgrade opportunities
     Upgrade {
-        /// Path to skill directory or SKILL.md file
-        #[arg(name = "skill-dir")]
+        /// Path to skill directory or SKILL.md file [default: .]
+        #[arg(name = "skill-dir", default_value = ".")]
         skill_dir: PathBuf,
         /// Apply automatic upgrades
         #[arg(long)]
@@ -244,7 +250,8 @@ enum Commands {
     /// Format SKILL.md files (canonical key order, clean whitespace)
     #[command(alias = "format")]
     Fmt {
-        /// Paths to skill directories or SKILL.md files
+        /// Paths to skill directories or SKILL.md files [default: .]
+        #[arg(default_value = ".")]
         skill_dirs: Vec<PathBuf>,
         /// Check formatting without modifying files (exit 1 if unformatted)
         #[arg(long)]

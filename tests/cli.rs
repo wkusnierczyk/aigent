@@ -1092,8 +1092,14 @@ fn doc_generates_markdown_catalog() {
 }
 
 #[test]
-fn doc_no_args_exits_nonzero() {
-    aigent().arg("doc").assert().failure();
+fn doc_no_args_defaults_to_current_dir() {
+    // With default_value = ".", `doc` without args uses the current directory.
+    // From a non-skill directory, it produces an empty catalog with a warning.
+    aigent()
+        .arg("doc")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("cannot read skill properties"));
 }
 
 #[test]
@@ -1903,4 +1909,80 @@ fn test_json_format_outputs_suite_result() {
     let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(json["passed"], 1);
     assert_eq!(json["failed"], 0);
+}
+
+// ── Default directory (#116) ────────────────────────────────────────
+
+#[test]
+fn validate_defaults_to_current_dir() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
+    );
+    aigent()
+        .arg("validate")
+        .current_dir(&dir)
+        .assert()
+        .success();
+}
+
+#[test]
+fn validate_explicit_path_still_works() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
+    );
+    aigent()
+        .args(["validate", dir.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[test]
+fn properties_defaults_to_current_dir() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
+    );
+    aigent()
+        .arg("properties")
+        .current_dir(&dir)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\": \"my-skill\""));
+}
+
+#[test]
+fn score_defaults_to_current_dir() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
+    );
+    aigent()
+        .arg("score")
+        .current_dir(&dir)
+        .assert()
+        .stderr(predicate::str::contains("Score:"));
+}
+
+#[test]
+fn fmt_check_defaults_to_current_dir() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
+    );
+    aigent()
+        .args(["fmt", "--check"])
+        .current_dir(&dir)
+        .assert()
+        .success();
+}
+
+#[test]
+fn check_defaults_to_current_dir() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
+    );
+    aigent().arg("check").current_dir(&dir).assert().success();
 }

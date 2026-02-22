@@ -437,20 +437,26 @@ Full API documentation is available at [docs.rs/aigent](https://docs.rs/aigent).
 
 <table>
 <tr><th width="280">Command</th><th>Description</th></tr>
-<tr><td><code>build &lt;dirs...&gt;</code></td><td>Assemble skills into a Claude Code plugin</td></tr>
-<tr><td><code>check &lt;dirs...&gt;</code></td><td>Run validate + semantic lint checks (superset of <code>validate</code>)</td></tr>
-<tr><td><code>doc &lt;dirs...&gt;</code></td><td>Generate a markdown skill catalog</td></tr>
-<tr><td><code>format &lt;dirs...&gt;</code></td><td>Format <code>SKILL.md</code> files (canonical key order, clean whitespace)</td></tr>
+<tr><td><code>build [dirs...]</code></td><td>Assemble skills into a Claude Code plugin</td></tr>
+<tr><td><code>check [dirs...]</code></td><td>Run validate + semantic lint checks (superset of <code>validate</code>)</td></tr>
+<tr><td><code>doc [dirs...]</code></td><td>Generate a markdown skill catalog</td></tr>
+<tr><td><code>format [dirs...]</code></td><td>Format <code>SKILL.md</code> files (canonical key order, clean whitespace)</td></tr>
 <tr><td><code>init [directory]</code></td><td>Create a template <code>SKILL.md</code></td></tr>
 <tr><td><code>new &lt;purpose&gt;</code></td><td>Create a skill from natural language</td></tr>
 <tr><td><code>probe &lt;directory&gt; &lt;query&gt;</code></td><td>Probe skill activation against a sample user query</td></tr>
-<tr><td><code>prompt &lt;dirs...&gt;</code></td><td>Generate <code>&lt;available_skills&gt;</code> XML block</td></tr>
-<tr><td><code>properties &lt;directory&gt;</code></td><td>Output skill properties as JSON</td></tr>
-<tr><td><code>score &lt;directory&gt;</code></td><td>Score a skill against best-practices checklist (0–100)</td></tr>
-<tr><td><code>test &lt;dirs...&gt;</code></td><td>Run fixture-based test suites from <code>tests.yml</code></td></tr>
-<tr><td><code>upgrade &lt;directory&gt;</code></td><td>Check a skill for upgrade opportunities</td></tr>
-<tr><td><code>validate &lt;dirs...&gt;</code></td><td>Validate skill directories against the specification</td></tr>
+<tr><td><code>prompt [dirs...]</code></td><td>Generate <code>&lt;available_skills&gt;</code> XML block</td></tr>
+<tr><td><code>properties [directory]</code></td><td>Output skill properties as JSON</td></tr>
+<tr><td><code>score [directory]</code></td><td>Score a skill against best-practices checklist (0–100)</td></tr>
+<tr><td><code>test [dirs...]</code></td><td>Run fixture-based test suites from <code>tests.yml</code></td></tr>
+<tr><td><code>upgrade [directory]</code></td><td>Check a skill for upgrade opportunities</td></tr>
+<tr><td><code>validate [dirs...]</code></td><td>Validate skill directories against the specification</td></tr>
 </table>
+
+> **Note**
+> When no path is given, the current directory is used. This lets you run
+> `aigent validate`, `aigent format --check`, etc. from inside a skill directory
+> without specifying a path. The only exception is `probe`, which requires both
+> a directory and a query.
 
 > **Note**
 > Backward compatibility: The following old command names are available as hidden
