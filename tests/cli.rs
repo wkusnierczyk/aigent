@@ -1247,6 +1247,35 @@ fn probe_skill_json_format() {
 }
 
 #[test]
+fn probe_wraps_long_description_aligned() {
+    let long_desc = "Validates AI agent skill definitions against the Anthropic agent \
+        skill specification checking all frontmatter fields and body guidelines";
+    let content = format!("---\nname: wrap-test\ndescription: {long_desc}\n---\nBody.\n");
+    let (_parent, dir) = make_skill_dir("wrap-test", &content);
+    let output = aigent()
+        .args(["probe", dir.to_str().unwrap(), "--query", "validate skill"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let desc_lines: Vec<&str> = stdout
+        .lines()
+        .skip_while(|l| !l.starts_with("Description:"))
+        .take_while(|l| !l.is_empty())
+        .collect();
+    assert!(
+        desc_lines.len() > 1,
+        "expected wrapped description, got: {desc_lines:?}",
+    );
+    // Continuation lines must be indented to value column (14 spaces).
+    for line in &desc_lines[1..] {
+        assert!(
+            line.starts_with("              "),
+            "continuation line not aligned: {line:?}",
+        );
+    }
+}
+
+#[test]
 fn probe_skill_missing_dir_exits_nonzero() {
     aigent()
         .args(["probe", "/nonexistent/skill", "--query", "some query"])
