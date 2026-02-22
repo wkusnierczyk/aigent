@@ -55,7 +55,9 @@ fn about_flag() {
         .stdout(predicate::str::contains("author:"))
         .stdout(predicate::str::contains("developer:"))
         .stdout(predicate::str::contains("licence:"))
-        .stdout(predicate::str::contains("https://opensource.org/licenses/"));
+        .stdout(predicate::str::contains(
+            "https://www.apache.org/licenses/LICENSE-2.0",
+        ));
 }
 
 #[test]
