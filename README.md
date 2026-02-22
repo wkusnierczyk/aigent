@@ -65,7 +65,7 @@ skill files so you can focus on writing the instructions rather than fighting th
     - [`new` — Create a skill from natural language](#new--create-a-skill-from-natural-language)
     - [`probe` — Simulate skill activation](#probe--simulate-skill-activation)
     - [`prompt` — Generate XML prompt block](#prompt--generate-xml-prompt-block)
-    - [`properties` — Output skill metadata as JSON](#properties--output-skill-metadata-as-json)
+    - [`read-properties` — Output skill metadata as JSON](#read-properties--output-skill-metadata-as-json)
     - [`score` — Rate a skill 0–100](#score--rate-a-skill-0100)
     - [`test` — Run fixture-based test suites](#test--run-fixture-based-test-suites)
     - [`upgrade` — Detect and apply best-practice improvements](#upgrade--detect-and-apply-best-practice-improvements)
@@ -173,7 +173,7 @@ aigent build my-skill/ other-skill/ --output ./dist
 aigent doc skills/ --recursive
 
 # Read skill properties as JSON
-aigent properties my-skill/
+aigent read-properties my-skill/
 
 # Generate XML prompt for LLM injection
 aigent prompt my-skill/ other-skill/
@@ -435,7 +435,7 @@ Full API documentation is available at [docs.rs/aigent](https://docs.rs/aigent).
 <tr><td><code>new &lt;purpose&gt;</code></td><td>Create a skill from natural language</td></tr>
 <tr><td><code>probe &lt;directory&gt; &lt;query&gt;</code></td><td>Probe skill activation against a sample user query</td></tr>
 <tr><td><code>prompt &lt;dirs...&gt;</code></td><td>Generate <code>&lt;available_skills&gt;</code> XML block</td></tr>
-<tr><td><code>properties &lt;directory&gt;</code></td><td>Output skill properties as JSON</td></tr>
+<tr><td><code>read-properties &lt;directory&gt;</code></td><td>Output skill properties as JSON</td></tr>
 <tr><td><code>score &lt;directory&gt;</code></td><td>Score a skill against best-practices checklist (0–100)</td></tr>
 <tr><td><code>test &lt;dirs...&gt;</code></td><td>Run fixture-based test suites from <code>tests.yml</code></td></tr>
 <tr><td><code>upgrade &lt;directory&gt;</code></td><td>Check a skill for upgrade opportunities</td></tr>
@@ -461,18 +461,18 @@ what "success" means for each command.
 | Command | Exit 0 | Exit 1 |
 |---------|--------|--------|
 | `build` | Plugin assembled successfully | Assembly error |
-| `check` | No errors or warnings | Errors or warnings found |
+| `check` | No errors | Errors found (warnings do not affect exit code) |
 | `doc` | Catalog generated | I/O error |
 | `format` | All files already formatted | Files were reformatted (with `--check`) or error |
 | `init` | Template created | Directory already exists or I/O error |
 | `new` | Skill created | Build error |
 | `probe` | Always (result printed) | Parse or I/O error |
 | `prompt` | Prompt generated | No valid skills found |
-| `properties` | Properties printed | Parse error |
+| `read-properties` | Properties printed | Parse error |
 | `score` | Perfect score (100/100) | Score below 100 |
 | `test` | All test cases pass | Any test case fails |
 | `upgrade` | No suggestions, or applied successfully | Unapplied suggestions remain, or error |
-| `validate` | No errors or warnings | Errors or warnings found |
+| `validate` | No errors | Errors found (warnings do not affect exit code) |
 
 ### Command flags
 
@@ -607,7 +607,7 @@ and run semantic lint only.
 
 Diagnostics use three severity levels:
 - **error** — specification violation (causes exit 1)
-- **warning** — specification conformance issue (causes exit 1)
+- **warning** — specification conformance issue (does not affect exit code)
 - **info** — quality suggestion from semantic lint (does not affect exit code)
 
 ```
@@ -784,13 +784,16 @@ $ aigent prompt skills/aigent-validator
 </available_skills>
 ```
 
-#### `properties` — Output skill metadata as JSON
+#### `read-properties` — Output skill metadata as JSON
 
 Parses the `SKILL.md` frontmatter and outputs structured JSON. Useful for
 scripting and integration with other tools.
 
+> **Note**
+> A shorter `properties` alias is planned ([#114](https://github.com/wkusnierczyk/aigent/issues/114)).
+
 ```
-$ aigent properties skills/aigent-validator
+$ aigent read-properties skills/aigent-validator
 {
   "name": "aigent-validator",
   "description": "Validates AI agent skill definitions ...",
@@ -933,7 +936,7 @@ Missing 'compatibility' field — recommended for multi-platform skills.
 #### `validate` — Check skill directories for specification conformance
 
 Validates one or more skill directories against the Anthropic specification.
-Exit code 0 means valid; non-zero means errors or warnings were found. For
+Exit code 0 means valid; non-zero means errors were found (warnings do not affect exit code). For
 combined validation + semantic quality checks, use `check` instead.
 
 ```
