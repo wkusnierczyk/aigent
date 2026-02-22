@@ -120,7 +120,7 @@
   (structural 60pts + quality 40pts)
 - `test` command: simulate skill activation with query matching
 - `upgrade` command: detect and apply missing best-practice fields
-  (`compatibility`, `metadata.version`, `metadata.author`, trigger phrases)
+  (`compatibility`, trigger phrases)
 - `doc` command: generate skill catalogs with diff-aware output
 - `init` command: scaffold new skill directories from templates
 - `lint` subcommand and `--lint` flag for semantic quality checks (I001–I005)
