@@ -202,12 +202,10 @@ aigent prompt my-skill/ other-skill/
 aigent validate-plugin my-plugin/
 ```
 
-To enable LLM-enhanced generation, set an API key in your environment
-(for example, `export ANTHROPIC_API_KEY=sk-...`). 
-
-Without an API key,
-the builder uses deterministic mode, which requires no configuration.
-See [Builder Modes](#builder-modes) for details.
+To enable LLM-enhanced generation, set an API key for any
+[supported provider](#builder-modes) (Anthropic, OpenAI, Google, or Ollama).
+Without an API key, the builder uses deterministic mode, which requires
+no configuration.
 
 ## Library usage
 
