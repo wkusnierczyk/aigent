@@ -94,7 +94,7 @@ cmd_set() {
         "$ROOT/target/debug/aigent" --about > "$ABOUT_FILE" 2>/dev/null
         if [[ -s "$ABOUT_FILE" ]]; then
             # Verify the binary reports the expected version
-            if ! grep -q "version:.*$VERSION" "$ABOUT_FILE"; then
+            if ! grep -Fq "$VERSION" "$ABOUT_FILE"; then
                 echo "Error: built binary reports wrong version (expected $VERSION)" >&2
                 cat "$ABOUT_FILE" >&2
                 rm -f "$ABOUT_FILE"
@@ -116,7 +116,7 @@ cmd_set() {
                 { print }
             ' "$README" > "$TMPFILE"
             # Verify the replacement actually happened
-            if ! grep -q "version:.*$VERSION" "$TMPFILE"; then
+            if ! grep -Fq "$VERSION" "$TMPFILE"; then
                 echo "Error: README --about block not updated (heading mismatch?)" >&2
                 rm -f "$TMPFILE" "$ABOUT_FILE"
                 exit 1
@@ -153,7 +153,7 @@ cmd_set() {
     # 5. Cargo.lock — regenerate
     if [[ $CHANGED -eq 1 ]]; then
         echo "Regenerating Cargo.lock..."
-        (cd "$ROOT" && cargo check --quiet 2>/dev/null)
+        (cd "$ROOT" && cargo check --quiet)
         echo "Cargo.lock regenerated"
     else
         echo "Cargo.lock: no changes needed"
