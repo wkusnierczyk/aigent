@@ -486,7 +486,7 @@ what "success" means for each command.
 | `format` | All files already formatted | Files were reformatted (with `--check`) or error |
 | `init` | Template created | Directory already exists or I/O error |
 | `new` | Skill created | Build error |
-| `probe` | Always (result printed) | Parse or I/O error |
+| `probe` | At least one result printed | All directories failed to parse |
 | `prompt` | Prompt generated | No valid skills found |
 | `properties` | Properties printed | Parse error |
 | `score` | Perfect score (100/100) | Score below 100 |
@@ -541,6 +541,16 @@ Create a skill from natural language.
 <tr><td><code>--interactive, -i</code></td><td>Step-by-step confirmation mode</td></tr>
 <tr><td><code>--name &lt;name&gt;</code></td><td>Override the derived skill name</td></tr>
 <tr><td><code>--no-llm</code></td><td>Force deterministic mode (no LLM)</td></tr>
+</table>
+
+#### `probe` flags
+
+Probe skill activation against a sample user query.
+
+<table>
+<tr><th width="280">Flag</th><th>Description</th></tr>
+<tr><td><code>--query, -q &lt;query&gt;</code></td><td>Sample user query to test activation against (required)</td></tr>
+<tr><td><code>--format &lt;format&gt;</code></td><td>Output format: <code>text</code> or <code>json</code></td></tr>
 </table>
 
 #### `test` flags
@@ -778,6 +788,8 @@ Categories based on weighted score:
 
 Also reports estimated token cost and any validation issues.
 
+Single directory:
+
 ```
 $ aigent probe skills/aigent-validator --query "validate a skill"
 Skill: aigent-validator
@@ -792,11 +804,31 @@ Validation warnings (1):
   warning: unexpected metadata field: 'argument-hint'
 ```
 
+Multiple directories (results ranked by score, best first):
+
 ```
-$ aigent probe skills/aigent-validator --query "deploy kubernetes"
+$ aigent probe skills/* --query "validate a skill"
+Skill: aigent-validator
+...
+Activation: STRONG ✓ — description aligns well with query (score: 0.65)
+
+Skill: aigent-scorer
+...
+Activation: WEAK ⚠ — some overlap, but description may not trigger reliably (score: 0.25)
+
+Skill: aigent-builder
 ...
 Activation: NONE ✗ — description does not match the test query (score: 0.00)
-Token footprint: ~76 tokens
+```
+
+Default directory (from inside a skill directory):
+
+```
+$ cd skills/aigent-validator
+$ aigent probe --query "validate a skill"
+Skill: aigent-validator
+...
+Activation: STRONG ✓ — description aligns well with query (score: 0.65)
 ```
 
 #### `prompt` — Generate XML prompt block
