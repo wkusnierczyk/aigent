@@ -388,31 +388,27 @@ go beyond both the specification and the reference implementation.
 ### `aigent` vs. `plugin-dev`
 
 Anthropic's **`plugin-dev`** plugin (bundled with Claude Code) and **`aigent`**
-are complementary tools for skill development.
+are complementary tools for plugin development.
 
 | | **`aigent`** | **`plugin-dev`** |
 |---|---|---|
 | **What** | Rust CLI + library | Claude Code plugin (LLM-guided) |
-| **Scope** | Deep: `SKILL.md` toolchain | Broad: entire plugin ecosystem |
+| **Scope** | Deep: skills + plugin ecosystem validation | Broad: entire plugin ecosystem guidance |
 | **Validation** | Deterministic — typed diagnostics, error codes, JSON output | Heuristic — agent-based review |
+| **Plugin validation** | `aigent validate-plugin` — manifest, hooks, agents, commands, skills, cross-component | `plugin-validator` agent — LLM-driven review |
 | **Scoring** | Weighted 0–100 with CI gating | Not available |
 | **Formatting** | `aigent format` — idempotent, `--check` for CI | Not available |
 | **Testing** | Fixture-based (`tests.yml`) + single-query probe | General guidance only |
 | **Assembly** | `aigent build` — reproducible, scriptable | `/create-plugin` — guided, interactive |
-| **Ecosystem** | Skills + plugin validation (manifest, hooks, agents, commands, cross-component) | Skills + commands + agents + hooks + MCP + settings |
 
 Overall:
-* `aigent` handles the **depth** of `SKILL.md` quality enforcement (validation,
-scoring, formatting, testing, assembly). 
-* `plugin-dev` covers the **breadth**
-of the Claude Code plugin ecosystem (7 component types, ~21,000 words of
-guidance). 
+* `aigent` provides **deterministic enforcement** — skill quality (validation,
+scoring, formatting, testing, assembly) and plugin-level validation (manifest,
+hooks, agents, commands, cross-component consistency).
+* `plugin-dev` provides **LLM-guided breadth** across the Claude Code plugin
+ecosystem (7 component types, ~21,000 words of guidance).
 
 Use `plugin-dev` to learn patterns; use `aigent` to enforce them.
-
-> **Note**  
-> `aigent` is in active development and will likely cover more of `plugin-dev`'s
-> functionality in future releases (see [Roadmap](#roadmap)).
 
 For a complete comparison, see [dev/plugin-dev.md](dev/plugin-dev.md).
 
