@@ -128,10 +128,36 @@ fn validate_skill_md_file_path() {
         .stderr(predicate::str::is_empty());
 }
 
-// ── read-properties ─────────────────────────────────────────────────
+// ── properties ──────────────────────────────────────────────────────
 
 #[test]
-fn read_properties_valid() {
+fn properties_valid() {
+    let (_parent, dir) = make_skill_dir(
+        "my-skill",
+        "---\nname: my-skill\ndescription: A test skill\n---\nBody.\n",
+    );
+    aigent()
+        .args(["properties", dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\""))
+        .stdout(predicate::str::contains("my-skill"));
+}
+
+#[test]
+fn properties_invalid() {
+    let parent = tempdir().unwrap();
+    let dir = parent.path().join("no-skill");
+    fs::create_dir(&dir).unwrap();
+    aigent()
+        .args(["properties", dir.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("aigent properties:"));
+}
+
+#[test]
+fn read_properties_alias_works() {
     let (_parent, dir) = make_skill_dir(
         "my-skill",
         "---\nname: my-skill\ndescription: A test skill\n---\nBody.\n",
@@ -140,20 +166,7 @@ fn read_properties_valid() {
         .args(["read-properties", dir.to_str().unwrap()])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"name\""))
-        .stdout(predicate::str::contains("my-skill"));
-}
-
-#[test]
-fn read_properties_invalid() {
-    let parent = tempdir().unwrap();
-    let dir = parent.path().join("no-skill");
-    fs::create_dir(&dir).unwrap();
-    aigent()
-        .args(["read-properties", dir.to_str().unwrap()])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("aigent read-properties:"));
+        .stdout(predicate::str::contains("\"name\""));
 }
 
 #[test]
