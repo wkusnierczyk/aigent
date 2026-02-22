@@ -1193,11 +1193,10 @@ fn print_about() {
          ├─ author:     {}\n\
          ├─ developer:  mailto:waclaw.kusnierczyk@gmail.com\n\
          ├─ source:     {}\n\
-         └─ licence:    {} https://opensource.org/licenses/{}",
+         └─ licence:    {} https://www.apache.org/licenses/LICENSE-2.0",
         env!("CARGO_PKG_VERSION"),
         env!("CARGO_PKG_AUTHORS"),
         env!("CARGO_PKG_REPOSITORY"),
-        env!("CARGO_PKG_LICENSE"),
         env!("CARGO_PKG_LICENSE"),
     );
 }

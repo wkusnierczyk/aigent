@@ -1433,7 +1433,7 @@ aigent: Rust AI Agent Skills Tool
 ├─ author:     Wacław Kuśnierczyk
 ├─ developer:  mailto:waclaw.kusnierczyk@gmail.com
 ├─ source:     https://github.com/wkusnierczyk/aigent
-└─ licence:    MIT https://opensource.org/licenses/MIT
+└─ licence:    Apache-2.0 https://www.apache.org/licenses/LICENSE-2.0
 ```
 
-[MIT](LICENSE) — see [opensource.org/licenses/MIT](https://opensource.org/licenses/MIT).
+[Apache 2.0](LICENSE) — see [apache.org/licenses/LICENSE-2.0](https://www.apache.org/licenses/LICENSE-2.0).

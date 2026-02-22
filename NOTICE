@@ -1,0 +1,19 @@
+aigent
+Copyright 2026 Wacek Kusnierczyk
+
+This product includes software developed by Wacek Kusnierczyk
+(https://github.com/wkusnierczyk/aigent).
+
+Licensed under the Apache License, Version 2.0.
+
+This project implements the Agent Skills specification
+(https://agentskills.io/specification).
+
+---
+
+PRIOR LICENSE NOTICE
+
+Versions of aigent prior to 0.6.1 were released under the
+MIT License. The relicensing to Apache License 2.0 was performed by the
+sole copyright holder. All prior MIT-licensed releases remain available
+under the MIT License as published.

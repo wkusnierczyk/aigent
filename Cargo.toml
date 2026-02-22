@@ -2,7 +2,7 @@
 name = "aigent"
 version = "0.6.0"
 edition = "2021"
-license = "MIT"
+license = "Apache-2.0"
 description = "A library, CLI, and Claude plugin for managing agent skill definitions"
 repository = "https://github.com/wkusnierczyk/aigent"
 authors = ["Wacław Kuśnierczyk"]

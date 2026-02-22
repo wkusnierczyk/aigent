@@ -8,6 +8,6 @@
   },
   "homepage": "https://github.com/wkusnierczyk/aigent",
   "repository": "https://github.com/wkusnierczyk/aigent",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "keywords": ["ai", "agent", "skills", "skill-builder", "validator"]
 }
