@@ -1187,7 +1187,12 @@ fn probe_skill_shows_activation_status() {
         "---\nname: test-skill-activate\ndescription: Processes PDF files and extracts text\n---\nBody.\n",
     );
     aigent()
-        .args(["probe", dir.to_str().unwrap(), "process PDF files"])
+        .args([
+            "probe",
+            dir.to_str().unwrap(),
+            "--query",
+            "process PDF files",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("Activation:"))
@@ -1201,7 +1206,12 @@ fn probe_skill_no_match_query() {
         "---\nname: test-no-match\ndescription: Manages database connections\n---\nBody.\n",
     );
     aigent()
-        .args(["probe", dir.to_str().unwrap(), "deploy kubernetes cluster"])
+        .args([
+            "probe",
+            dir.to_str().unwrap(),
+            "--query",
+            "deploy kubernetes cluster",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("NONE"));
@@ -1217,6 +1227,7 @@ fn probe_skill_json_format() {
         .args([
             "probe",
             dir.to_str().unwrap(),
+            "--query",
             "process PDF",
             "--format",
             "json",
@@ -1233,7 +1244,7 @@ fn probe_skill_json_format() {
 #[test]
 fn probe_skill_missing_dir_exits_nonzero() {
     aigent()
-        .args(["probe", "/nonexistent/skill", "some query"])
+        .args(["probe", "/nonexistent/skill", "--query", "some query"])
         .assert()
         .failure();
 }
@@ -1483,24 +1494,60 @@ fn probe_command_shows_activation() {
         "---\nname: processing-pdf-files\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
     );
     aigent()
-        .args(["probe", dir.to_str().unwrap(), "process PDF files"])
+        .args([
+            "probe",
+            dir.to_str().unwrap(),
+            "--query",
+            "process PDF files",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("Activation:"));
 }
 
 #[test]
-fn probe_command_accepts_query() {
+fn probe_defaults_to_current_dir() {
     let (_parent, dir) = make_skill_dir(
         "processing-pdf-files",
         "---\nname: processing-pdf-files\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
     );
-    // `probe` works directly (no `test` alias — `test` is now the fixture runner).
     aigent()
-        .args(["probe", dir.to_str().unwrap(), "process PDF files"])
+        .args(["probe", "--query", "process PDF files"])
+        .current_dir(&dir)
         .assert()
         .success()
         .stdout(predicate::str::contains("Activation:"));
+}
+
+#[test]
+fn probe_multiple_dirs_ranked() {
+    let parent = tempdir().unwrap();
+    let dir_a = parent.path().join("skill-a");
+    let dir_b = parent.path().join("skill-b");
+    fs::create_dir(&dir_a).unwrap();
+    fs::create_dir(&dir_b).unwrap();
+    fs::write(
+        dir_a.join("SKILL.md"),
+        "---\nname: skill-a\ndescription: Processes PDF files and extracts text\n---\nBody.\n",
+    )
+    .unwrap();
+    fs::write(
+        dir_b.join("SKILL.md"),
+        "---\nname: skill-b\ndescription: Manages database connections\n---\nBody.\n",
+    )
+    .unwrap();
+    aigent()
+        .args([
+            "probe",
+            dir_a.to_str().unwrap(),
+            dir_b.to_str().unwrap(),
+            "--query",
+            "process PDF files",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("skill-a"))
+        .stdout(predicate::str::contains("skill-b"));
 }
 
 #[test]

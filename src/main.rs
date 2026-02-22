@@ -190,13 +190,13 @@ enum Commands {
         #[arg(long)]
         recursive: bool,
     },
-    /// Probe a skill's activation surface with a sample query
+    /// Probe skill activation against a sample query
     Probe {
-        /// Path to skill directory or SKILL.md file
-        #[arg(name = "skill-dir")]
-        skill_dir: PathBuf,
+        /// Paths to skill directories or SKILL.md files [default: .]
+        #[arg(default_value = ".")]
+        skill_dirs: Vec<PathBuf>,
         /// Sample user query to test activation against
-        #[arg(name = "query")]
+        #[arg(long, short)]
         query: String,
         /// Output format
         #[arg(long, value_enum, default_value_t = Format::Text)]
@@ -745,36 +745,65 @@ fn main() {
             }
         }
         Some(Commands::Probe {
-            skill_dir,
+            skill_dirs,
             query,
             format,
         }) => {
-            let dir = resolve_skill_dir(&skill_dir);
-            match aigent::test_skill(&dir, &query) {
-                Ok(result) => match format {
-                    Format::Text => {
-                        print!("{}", aigent::tester::format_test_result(&result));
+            let dirs: Vec<PathBuf> = skill_dirs.iter().map(|p| resolve_skill_dir(p)).collect();
+            let mut results = Vec::new();
+            let mut had_errors = false;
+            for dir in &dirs {
+                match aigent::test_skill(dir, &query) {
+                    Ok(result) => results.push(result),
+                    Err(e) => {
+                        eprintln!("aigent probe: {}: {e}", dir.display());
+                        had_errors = true;
                     }
-                    Format::Json => {
-                        let json = serde_json::json!({
-                            "name": result.name,
-                            "query": result.query,
-                            "description": result.description,
-                            "activation": format!("{:?}", result.query_match),
-                            "estimated_tokens": result.estimated_tokens,
-                            "validation_errors": result.diagnostics.iter()
-                                .filter(|d| d.is_error()).count(),
-                            "validation_warnings": result.diagnostics.iter()
-                                .filter(|d| d.is_warning()).count(),
-                            "structure_issues": result.structure_diagnostics.len(),
-                        });
+                }
+            }
+            // Sort by score descending (best match first)
+            results.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            match format {
+                Format::Text => {
+                    for (i, result) in results.iter().enumerate() {
+                        if i > 0 {
+                            println!();
+                        }
+                        print!("{}", aigent::tester::format_test_result(result));
+                    }
+                }
+                Format::Json => {
+                    let json: Vec<_> = results
+                        .iter()
+                        .map(|result| {
+                            serde_json::json!({
+                                "name": result.name,
+                                "query": result.query,
+                                "description": result.description,
+                                "activation": format!("{:?}", result.query_match),
+                                "score": result.score,
+                                "estimated_tokens": result.estimated_tokens,
+                                "validation_errors": result.diagnostics.iter()
+                                    .filter(|d| d.is_error()).count(),
+                                "validation_warnings": result.diagnostics.iter()
+                                    .filter(|d| d.is_warning()).count(),
+                                "structure_issues": result.structure_diagnostics.len(),
+                            })
+                        })
+                        .collect();
+                    if json.len() == 1 {
+                        println!("{}", serde_json::to_string_pretty(&json[0]).unwrap());
+                    } else {
                         println!("{}", serde_json::to_string_pretty(&json).unwrap());
                     }
-                },
-                Err(e) => {
-                    eprintln!("aigent probe: {e}");
-                    std::process::exit(1);
                 }
+            }
+            if had_errors && results.is_empty() {
+                std::process::exit(1);
             }
         }
         Some(Commands::Build {
