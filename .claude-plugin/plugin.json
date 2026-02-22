@@ -1,7 +1,7 @@
 {
   "name": "aigent",
   "description": "AI agent skill builder and validator — create and validate SKILL.md files following the Anthropic agent skill specification",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "author": {
     "name": "Wacław Kuśnierczyk",
     "url": "https://github.com/wkusnierczyk"

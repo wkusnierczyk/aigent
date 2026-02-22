@@ -1,5 +1,14 @@
 # Changes
 
+## [0.5.0] — 2026-02-22
+
+- Move build matrix table from CI to release section in README (#127)
+- Add `release` subcommand to version.sh (#126)
+- Default to current directory when no skill path is given (#125)
+- Fix version.sh: case-sensitive heading match and missing verification (#123)
+- Show diff in `format --check` output (#122)
+- Add `properties` as alias for `read-properties` (#121)
+
 ## [0.4.1] — 2026-02-22
 
 ### Changed
