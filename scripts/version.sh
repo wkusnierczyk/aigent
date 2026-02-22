@@ -12,7 +12,7 @@
 # Files updated by set/bump:
 #   1. Cargo.toml                  — version = "x.y.z"
 #   2. .claude-plugin/plugin.json  — "version": "x.y.z"
-#   3. README.md                   — --about block version line
+#   3. README.md                   — --about block (rebuilt from binary)
 #   4. CHANGES.md                  — stub entry for new version
 #   5. Cargo.lock                  — regenerated via cargo check
 
@@ -87,18 +87,26 @@ cmd_set() {
     # 3. README.md — rebuild --about block from actual binary output
     if [[ -f "$README" ]]; then
         echo "Building binary for --about output..."
-        (cd "$ROOT" && cargo build --quiet 2>/dev/null)
+        touch "$ROOT/src/main.rs"
+        (cd "$ROOT" && cargo build --quiet)
         local ABOUT_FILE
         ABOUT_FILE="$(mktemp)"
         "$ROOT/target/debug/aigent" --about > "$ABOUT_FILE" 2>/dev/null
         if [[ -s "$ABOUT_FILE" ]]; then
-            # Replace the code block under "## About and Licence":
+            # Verify the binary reports the expected version
+            if ! grep -q "version:.*$VERSION" "$ABOUT_FILE"; then
+                echo "Error: built binary reports wrong version (expected $VERSION)" >&2
+                cat "$ABOUT_FILE" >&2
+                rm -f "$ABOUT_FILE"
+                exit 1
+            fi
+            # Replace the code block under "## About and licence":
             # print everything, but skip lines inside the ``` block
             # and insert the fresh --about output instead.
             local TMPFILE
             TMPFILE="$(mktemp)"
             awk -v aboutfile="$ABOUT_FILE" '
-                /^## About and Licence/ { in_section=1; print; next }
+                /^## About and [Ll]icence/ { in_section=1; print; next }
                 in_section && /^```$/ && !in_block { in_block=1; print; next }
                 in_section && in_block && /^```$/ {
                     while ((getline line < aboutfile) > 0) print line
@@ -107,6 +115,12 @@ cmd_set() {
                 in_section && in_block { next }
                 { print }
             ' "$README" > "$TMPFILE"
+            # Verify the replacement actually happened
+            if ! grep -q "version:.*$VERSION" "$TMPFILE"; then
+                echo "Error: README --about block not updated (heading mismatch?)" >&2
+                rm -f "$TMPFILE" "$ABOUT_FILE"
+                exit 1
+            fi
             mv "$TMPFILE" "$README"
             echo "Updated README.md --about block from binary output"
             CHANGED=1
