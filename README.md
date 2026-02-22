@@ -33,6 +33,7 @@ skill subdirectories, and cross-component consistency with `aigent validate-plug
 ## Table of contents
 
 - [Installation](#installation)
+  - [Homebrew (macOS and Linux)](#homebrew-macos-and-linux)
   - [Pre-built binaries](#pre-built-binaries)
   - [Install script (Linux and macOS)](#install-script-linux-and-macos)
   - [From crates.io](#from-cratesio)
@@ -106,6 +107,12 @@ skill subdirectories, and cross-component consistency with `aigent validate-plug
 Pre-built binaries are available for all major platforms — no Rust toolchain required.
 If you prefer to build from source, see [From crates.io](#from-cratesio) or
 [From source](#from-source) below.
+
+### Homebrew (macOS and Linux)
+
+```bash
+brew install wkusnierczyk/aigent/aigent
+```
 
 ### Pre-built binaries
 
