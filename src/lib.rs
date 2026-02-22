@@ -85,7 +85,8 @@ pub use prompt::{
 pub use scorer::{score, ScoreResult};
 pub use structure::validate_structure;
 pub use test_runner::{
-    format_text as format_test_suite, generate_fixture, run_test_suite, TestSuiteResult,
+    format_text as format_test_suite, generate_fixture, run_test_suite, MatchStrength,
+    TestSuiteResult,
 };
 pub use tester::{test_skill, TestResult};
 pub use validator::{

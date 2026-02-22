@@ -2373,3 +2373,110 @@ fn validate_plugin_json_includes_all_components() {
     assert!(paths.contains(&"hooks.json"));
     assert!(paths.iter().any(|p| p.starts_with("agents/")));
 }
+
+// ── Scaffolding (#111) ─────────────────────────────────────────────
+
+#[test]
+fn init_creates_scaffolding_dirs() {
+    let parent = tempfile::tempdir().unwrap();
+    let dir = parent.path().join("scaffold-test");
+    aigent()
+        .args(["init", dir.to_str().unwrap()])
+        .assert()
+        .success();
+    assert!(dir.join("examples").is_dir());
+    assert!(dir.join("examples/.gitkeep").exists());
+    assert!(dir.join("scripts").is_dir());
+    assert!(dir.join("scripts/.gitkeep").exists());
+}
+
+#[test]
+fn init_minimal_skips_scaffolding_dirs() {
+    let parent = tempfile::tempdir().unwrap();
+    let dir = parent.path().join("minimal-test");
+    aigent()
+        .args(["init", dir.to_str().unwrap(), "--minimal"])
+        .assert()
+        .success();
+    assert!(dir.join("SKILL.md").exists());
+    assert!(!dir.join("examples").exists());
+    assert!(!dir.join("scripts").exists());
+}
+
+#[test]
+fn new_creates_scaffolding_dirs() {
+    let parent = tempfile::tempdir().unwrap();
+    let dir = parent.path().join("processing-pdf-files");
+    aigent()
+        .args([
+            "new",
+            "Process PDF files",
+            "--no-llm",
+            "--dir",
+            dir.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    assert!(dir.join("examples").is_dir());
+    assert!(dir.join("scripts").is_dir());
+}
+
+#[test]
+fn new_minimal_skips_scaffolding_dirs() {
+    let parent = tempfile::tempdir().unwrap();
+    let dir = parent.path().join("processing-pdf-files");
+    aigent()
+        .args([
+            "new",
+            "Process PDF files",
+            "--no-llm",
+            "--dir",
+            dir.to_str().unwrap(),
+            "--minimal",
+        ])
+        .assert()
+        .success();
+    assert!(dir.join("SKILL.md").exists());
+    assert!(!dir.join("examples").exists());
+    assert!(!dir.join("scripts").exists());
+}
+
+// ── Test runner strength (#104) ────────────────────────────────────
+
+#[test]
+fn test_generate_emits_strength() {
+    let (_parent, dir) = make_skill_dir(
+        "strength-gen",
+        "---\nname: strength-gen\ndescription: Processes documents. Use when handling files.\n---\nBody.\n",
+    );
+    aigent()
+        .args(["test", dir.to_str().unwrap(), "--generate"])
+        .assert()
+        .success();
+    let content = fs::read_to_string(dir.join("tests.yml")).unwrap();
+    assert!(
+        content.contains("strength: strong"),
+        "generated fixture should use strength, got:\n{content}"
+    );
+    assert!(
+        !content.contains("min_score"),
+        "generated fixture should not use min_score"
+    );
+}
+
+#[test]
+fn test_strength_weak_passes_for_matching_query() {
+    let (_parent, dir) = make_skill_dir(
+        "strength-weak",
+        "---\nname: strength-weak\ndescription: Processes PDF files and generates reports. Use when working with documents.\n---\nBody.\n",
+    );
+    fs::write(
+        dir.join("tests.yml"),
+        "queries:\n  - input: \"process PDF files\"\n    should_match: true\n    strength: weak\n",
+    )
+    .unwrap();
+    aigent()
+        .args(["test", dir.to_str().unwrap()])
+        .assert()
+        .success();
+}

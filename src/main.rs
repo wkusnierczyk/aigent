@@ -168,6 +168,9 @@ enum Commands {
         /// Interactive mode with step-by-step confirmation
         #[arg(long, short = 'i')]
         interactive: bool,
+        /// Skip scaffolding of examples/ and scripts/ directories
+        #[arg(long)]
+        minimal: bool,
     },
     /// Score a skill against best-practices checklist
     Score {
@@ -276,6 +279,9 @@ enum Commands {
         /// Template variant for skill structure
         #[arg(long, value_enum, default_value_t = SkillTemplate::Minimal)]
         template: SkillTemplate,
+        /// Skip scaffolding of examples/ and scripts/ directories
+        #[arg(long)]
+        minimal: bool,
     },
 }
 
@@ -678,12 +684,14 @@ fn main() {
             dir,
             no_llm,
             interactive,
+            minimal,
         }) => {
             let spec = aigent::SkillSpec {
                 purpose,
                 name,
                 output_dir: dir,
                 no_llm,
+                minimal,
                 ..Default::default()
             };
             let result = if interactive {
@@ -1138,9 +1146,13 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Some(Commands::Init { dir, template }) => {
+        Some(Commands::Init {
+            dir,
+            template,
+            minimal,
+        }) => {
             let target = dir.unwrap_or_else(|| PathBuf::from("."));
-            match aigent::init_skill(&target, template) {
+            match aigent::init_skill(&target, template, minimal) {
                 Ok(path) => {
                     println!("Created {}", path.display());
                 }
