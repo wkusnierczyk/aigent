@@ -24,6 +24,12 @@ pattern that keeps the context window lean.
 The `aigent` tool validates, formats, and assembles these
 skill files so you can focus on writing the instructions rather than fighting the specification.
 
+Beyond individual skills, `aigent` validates entire
+[Claude Code plugin](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/extensions)
+directories — checking the `plugin.json` manifest, `hooks.json` configuration,
+agent and command files, skill subdirectories, and cross-component consistency
+(naming conventions, duplicate detection, token budgets, orphaned files).
+
 ## Table of contents
 
 - [Installation](#installation)
