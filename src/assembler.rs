@@ -2,7 +2,7 @@
 //!
 //! Takes one or more skill directories and generates a complete plugin directory
 //! structure with a `plugin.json` manifest, `skills/` subdirectory containing
-//! the skill files, and scaffolded `agents/` and `hooks/` directories.
+//! the skill files.
 
 use std::path::{Path, PathBuf};
 
@@ -55,8 +55,6 @@ pub struct AssembleResult {
 /// │   │   └── SKILL.md
 /// │   └── <skill-2>/
 /// │       └── SKILL.md
-/// ├── agents/
-/// └── hooks/
 /// ```
 ///
 /// # Errors
@@ -119,12 +117,8 @@ pub fn assemble_plugin(skill_dirs: &[&Path], opts: &AssembleOptions) -> Result<A
     // Create output directory structure.
     let out = &opts.output_dir;
     let skills_dir = out.join("skills");
-    let agents_dir = out.join("agents");
-    let hooks_dir = out.join("hooks");
 
     std::fs::create_dir_all(&skills_dir)?;
-    std::fs::create_dir_all(&agents_dir)?;
-    std::fs::create_dir_all(&hooks_dir)?;
 
     // Copy each skill into skills/<name>/.
     for (name, skill_path) in &skills {
@@ -248,13 +242,10 @@ fn copy_dir_recursive(src: &Path, dest: &Path, depth: usize) -> Result<()> {
 ///
 /// Uses `serde_json` for proper escaping of all string values.
 fn generate_plugin_json(name: &str, skills: &[(String, PathBuf)]) -> Result<String> {
-    let skill_names: Vec<&str> = skills.iter().map(|(name, _)| name.as_str()).collect();
-
     let json = serde_json::json!({
         "name": name,
         "description": format!("Plugin assembled from {} skill(s)", skills.len()),
         "version": "0.1.0",
-        "skills": skill_names,
     });
 
     serde_json::to_string_pretty(&json).map_err(|e| AigentError::Build {
@@ -293,8 +284,8 @@ mod tests {
         assert_eq!(result.skills_count, 1);
         assert!(out.join("plugin.json").exists());
         assert!(out.join("skills/my-skill/SKILL.md").exists());
-        assert!(out.join("agents").exists());
-        assert!(out.join("hooks").exists());
+        assert!(!out.join("agents").exists());
+        assert!(!out.join("hooks").exists());
     }
 
     #[test]
@@ -341,7 +332,7 @@ mod tests {
         let json: serde_json::Value = serde_json::from_str(&json_str).unwrap();
         assert_eq!(json["name"], "test-plugin");
         assert_eq!(json["version"], "0.1.0");
-        assert!(json["skills"].as_array().unwrap().len() == 1);
+        assert!(json.get("skills").is_none());
     }
 
     #[test]
@@ -463,12 +454,35 @@ mod tests {
     }
 
     #[test]
+    fn assembled_plugin_passes_validate_manifest() {
+        let parent = tempdir().unwrap();
+        let skill = make_skill(
+            parent.path(),
+            "my-skill",
+            "---\nname: my-skill\ndescription: Does things\n---\nBody.\n",
+        );
+        let out = parent.path().join("output");
+        let opts = AssembleOptions {
+            output_dir: out.clone(),
+            name: Some("test-plugin".into()),
+            validate: false,
+        };
+        assemble_plugin(&[skill.as_path()], &opts).unwrap();
+        let diags = crate::plugin::manifest::validate_manifest(&out.join("plugin.json"));
+        let errors: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
+        assert!(
+            errors.is_empty(),
+            "validate_manifest should find no errors in assembled plugin.json: {errors:?}",
+        );
+    }
+
+    #[test]
     fn generate_plugin_json_escapes_special_characters() {
         let skills = vec![("skill-with-\"quotes\"".to_string(), PathBuf::from("a.md"))];
         let json_str = generate_plugin_json("name-with-\"quotes\"", &skills).unwrap();
         let json: serde_json::Value = serde_json::from_str(&json_str).unwrap();
         assert_eq!(json["name"], "name-with-\"quotes\"");
-        assert_eq!(json["skills"][0], "skill-with-\"quotes\"");
+        assert!(json.get("skills").is_none());
     }
 
     #[test]
