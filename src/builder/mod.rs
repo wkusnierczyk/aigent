@@ -30,8 +30,8 @@ fn write_exclusive(path: &Path, content: &[u8]) -> Result<()> {
         .open(path)
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::AlreadyExists {
-                AigentError::Build {
-                    message: format!("SKILL.md already exists: {}", path.display()),
+                AigentError::AlreadyExists {
+                    path: path.to_path_buf(),
                 }
             } else {
                 AigentError::Build {
@@ -786,14 +786,15 @@ mod tests {
         };
         let result = build_skill(&spec);
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
+        let err = result.unwrap_err();
         assert!(
-            err.contains("SKILL.md already exists"),
-            "error should say 'SKILL.md already exists': {err}"
+            matches!(err, AigentError::AlreadyExists { .. }),
+            "expected AlreadyExists variant, got: {err}"
         );
+        let msg = err.to_string();
         assert!(
-            err.contains(&dir.join("SKILL.md").display().to_string()),
-            "error should contain the file path: {err}"
+            msg.contains(&dir.join("SKILL.md").display().to_string()),
+            "error should contain the file path: {msg}"
         );
     }
 
@@ -805,14 +806,15 @@ mod tests {
         std::fs::write(dir.join("SKILL.md"), "---\nname: x\n---\n").unwrap();
         let result = init_skill(&dir, SkillTemplate::Minimal);
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
+        let err = result.unwrap_err();
         assert!(
-            err.contains("SKILL.md already exists"),
-            "error should say 'SKILL.md already exists': {err}"
+            matches!(err, AigentError::AlreadyExists { .. }),
+            "expected AlreadyExists variant, got: {err}"
         );
+        let msg = err.to_string();
         assert!(
-            err.contains(&dir.join("SKILL.md").display().to_string()),
-            "error should contain the file path: {err}"
+            msg.contains(&dir.join("SKILL.md").display().to_string()),
+            "error should contain the file path: {msg}"
         );
     }
 

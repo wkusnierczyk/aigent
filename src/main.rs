@@ -398,7 +398,7 @@ fn main() {
                             eprintln!("  {d}");
                         }
                     }
-                    // Print summary for multi-dir.
+                    // Print summary for multi-dir, or "ok" for clean single-dir.
                     if multi {
                         let total = all_diags.len();
                         let errors = all_diags
@@ -415,6 +415,13 @@ fn main() {
                         eprintln!(
                             "\n{total} skills: {ok} ok, {errors} errors, {warnings} warnings only"
                         );
+                    } else {
+                        let total_diags: usize =
+                            all_diags.iter().map(|(_, d)| d.len()).sum::<usize>()
+                                + conflict_diags.len();
+                        if total_diags == 0 {
+                            eprintln!("ok");
+                        }
                     }
                 }
                 Format::Json => {
@@ -553,6 +560,11 @@ fn main() {
                         eprintln!(
                             "\n{total} skills: {ok} ok, {errors} errors, {warnings} warnings only"
                         );
+                    } else {
+                        let total_diags: usize = all_diags.iter().map(|(_, d)| d.len()).sum();
+                        if total_diags == 0 {
+                            eprintln!("ok");
+                        }
                     }
                 }
                 Format::Json => {
@@ -1026,6 +1038,11 @@ fn main() {
                 }
             }
 
+            // Print "ok" for single-dir text mode with no changes and no errors.
+            if !any_error && !any_changed && dirs.len() == 1 {
+                eprintln!("ok");
+            }
+
             if any_error || (check && any_changed) {
                 std::process::exit(1);
             }
@@ -1075,6 +1092,12 @@ fn main() {
                         }
                     }
                 }
+            }
+
+            // Cross-component consistency checks (X-series)
+            let cross_diags = aigent::validate_cross_component(&plugin_dir);
+            if !cross_diags.is_empty() {
+                all_diags.push(("<cross-component>".to_string(), cross_diags));
             }
 
             let has_errors = all_diags

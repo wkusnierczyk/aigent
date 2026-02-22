@@ -75,7 +75,7 @@ fn validate_valid_skill() {
         .args(["validate", dir.to_str().unwrap()])
         .assert()
         .success()
-        .stderr(predicate::str::is_empty());
+        .stderr(predicate::str::contains("ok"));
 }
 
 #[test]
@@ -125,7 +125,7 @@ fn validate_skill_md_file_path() {
         .args(["validate", skill_md.to_str().unwrap()])
         .assert()
         .success()
-        .stderr(predicate::str::is_empty());
+        .stderr(predicate::str::contains("ok"));
 }
 
 // ── properties ──────────────────────────────────────────────────────
@@ -384,7 +384,7 @@ fn validate_format_text_default() {
         .args(["validate", dir.to_str().unwrap(), "--format", "text"])
         .assert()
         .success()
-        .stderr(predicate::str::is_empty());
+        .stderr(predicate::str::contains("ok"));
 }
 
 #[test]
@@ -478,7 +478,7 @@ fn validate_target_claude_code_accepts_extension_fields() {
         .args(["validate", dir.to_str().unwrap(), "--target", "claude-code"])
         .assert()
         .success()
-        .stderr(predicate::str::is_empty());
+        .stderr(predicate::str::contains("ok"));
 }
 
 #[test]
@@ -491,7 +491,7 @@ fn validate_target_permissive_no_unknown_field_warnings() {
         .args(["validate", dir.to_str().unwrap(), "--target", "permissive"])
         .assert()
         .success()
-        .stderr(predicate::str::is_empty());
+        .stderr(predicate::str::contains("ok"));
 }
 
 // ── check command (validate + semantic) ───────────────────────────
@@ -570,7 +570,7 @@ fn check_perfect_skill_no_output() {
         .args(["check", dir.to_str().unwrap()])
         .assert()
         .success()
-        .stderr(predicate::str::is_empty());
+        .stderr(predicate::str::contains("ok"));
 }
 
 #[test]
@@ -1071,7 +1071,7 @@ fn validate_structure_clean_skill_no_warnings() {
         .args(["validate", dir.to_str().unwrap(), "--structure"])
         .assert()
         .success()
-        .stderr(predicate::str::is_empty());
+        .stderr(predicate::str::contains("ok"));
 }
 
 // ── M12: doc subcommand ──────────────────────────────────────────

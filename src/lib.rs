@@ -75,7 +75,8 @@ pub use parser::{
     CLAUDE_CODE_KEYS, KNOWN_KEYS,
 };
 pub use plugin::{
-    validate_agent, validate_command, validate_hooks, validate_manifest, PluginManifest,
+    validate_agent, validate_command, validate_cross_component, validate_hooks, validate_manifest,
+    PluginManifest,
 };
 pub use prompt::{
     collect_skills, collect_skills_verbose, estimate_tokens, format_budget, format_entries,
