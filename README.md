@@ -191,6 +191,9 @@ aigent properties my-skill/
 
 # Generate XML prompt for LLM injection
 aigent prompt my-skill/ other-skill/
+
+# Validate a full Claude Code plugin directory
+aigent validate-plugin my-plugin/
 ```
 
 To enable LLM-enhanced generation, set an API key in your environment
@@ -234,6 +237,11 @@ let spec = aigent::SkillSpec {
     ..Default::default()
 };
 let result = aigent::build_skill(&spec).unwrap();
+
+// Validate a plugin directory (manifest, hooks, agents, commands, skills)
+let manifest_diags = aigent::validate_manifest(Path::new("my-plugin/plugin.json"));
+let hooks_diags = aigent::validate_hooks(Path::new("my-plugin/hooks.json"));
+let cross_diags = aigent::validate_cross_component(Path::new("my-plugin"));
 ```
 
 ## `SKILL.md` format
