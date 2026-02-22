@@ -1326,17 +1326,32 @@ Every pull request runs the CI pipeline on a
 
 ### Release workflow
 
-Pushing a version tag (e.g., `v0.1.0`) triggers the release workflow.
+Releases are automated via `scripts/version.sh release`:
 
 ```bash
-# update version in sources
-./scripts/version.sh set 0.5.0
-
-git add Cargo.toml Cargo.lock .claude-plugin/plugin.json README.md CHANGES.md
-git commit -m "Bump version to 0.5.0"
-git tag v0.5.0
-git push origin v0.5.0
+./scripts/version.sh release 0.5.0     # explicit version
+./scripts/version.sh release patch      # auto-increment patch
+./scripts/version.sh release minor      # auto-increment minor
 ```
+
+This single command:
+
+1. Checks for a clean working tree and that the version tag doesn't exist
+2. Generates a changelog from merged PRs since the previous tag (via `gh`)
+3. Writes the changelog to `CHANGES.md`
+4. Updates version across all files (`Cargo.toml`, `plugin.json`, `README.md`, `Cargo.lock`)
+5. Commits, tags, and pushes — triggering the CI release workflow
+
+Use `--dry-run` to preview without executing:
+
+```bash
+./scripts/version.sh release patch --dry-run
+```
+
+**Prerequisite:** The [`gh` CLI](https://cli.github.com) must be installed and
+authenticated for changelog generation.
+
+Once the `v*` tag is pushed, the CI release workflow runs:
 
 | Step | Action |
 | --- | --- |
