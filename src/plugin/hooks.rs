@@ -187,7 +187,10 @@ pub fn validate_hooks(path: &Path) -> Vec<Diagnostic> {
                 // H010: Hardcoded absolute path in command
                 if hook_type == "command" {
                     if let Some(cmd) = &hook.command {
-                        if cmd.starts_with('/') {
+                        let has_absolute = cmd
+                            .split_whitespace()
+                            .any(|token| token.starts_with('/') || Path::new(token).is_absolute());
+                        if has_absolute {
                             diags.push(
                                 Diagnostic::new(
                                     Severity::Warning,

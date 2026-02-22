@@ -192,14 +192,15 @@ fn check_hook_script_paths(raw: &serde_json::Value, root: &Path, diags: &mut Vec
 
                 // Only check path-like commands (start with ./ or ${CLAUDE_PLUGIN_ROOT})
                 if expanded.starts_with("./") || command.contains("${CLAUDE_PLUGIN_ROOT}") {
-                    let script_path = if expanded.contains(' ') {
-                        // Command may have args — take just the first token
-                        expanded.split_whitespace().next().unwrap_or("")
-                    } else {
-                        &expanded
-                    };
+                    // Find the first token that looks like a script path, not a
+                    // command prefix like "bash" or "node".
+                    let script_token = expanded
+                        .split_whitespace()
+                        .find(|tok| tok.starts_with("./") || tok.starts_with('/'))
+                        .or_else(|| expanded.split_whitespace().next())
+                        .unwrap_or("");
 
-                    let resolved = root.join(script_path);
+                    let resolved = root.join(script_token);
                     if !resolved.exists() {
                         diags.push(
                             Diagnostic::new(

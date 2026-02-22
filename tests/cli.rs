@@ -75,7 +75,7 @@ fn validate_valid_skill() {
         .args(["validate", dir.to_str().unwrap()])
         .assert()
         .success()
-        .stderr(predicate::str::contains("ok"));
+        .stderr(predicate::str::is_match(r"(?m)^ok\r?$").unwrap());
 }
 
 #[test]
@@ -491,7 +491,7 @@ fn validate_target_permissive_no_unknown_field_warnings() {
         .args(["validate", dir.to_str().unwrap(), "--target", "permissive"])
         .assert()
         .success()
-        .stderr(predicate::str::contains("ok"));
+        .stderr(predicate::str::is_match(r"(?m)^ok\r?$").unwrap());
 }
 
 // ── check command (validate + semantic) ───────────────────────────
@@ -570,7 +570,7 @@ fn check_perfect_skill_no_output() {
         .args(["check", dir.to_str().unwrap()])
         .assert()
         .success()
-        .stderr(predicate::str::contains("ok"));
+        .stderr(predicate::str::is_match(r"(?m)^ok\r?$").unwrap());
 }
 
 #[test]
@@ -1071,7 +1071,7 @@ fn validate_structure_clean_skill_no_warnings() {
         .args(["validate", dir.to_str().unwrap(), "--structure"])
         .assert()
         .success()
-        .stderr(predicate::str::contains("ok"));
+        .stderr(predicate::str::is_match(r"(?m)^ok\r?$").unwrap());
 }
 
 // ── M12: doc subcommand ──────────────────────────────────────────
