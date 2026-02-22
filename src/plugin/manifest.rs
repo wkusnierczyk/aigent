@@ -223,7 +223,7 @@ pub fn validate_manifest(path: &Path) -> Vec<Diagnostic> {
     let plugin_dir = path.parent().unwrap_or(Path::new("."));
     for (field, value) in manifest.path_overrides() {
         // P006: absolute path
-        if Path::new(value).is_absolute() {
+        if value.starts_with('/') || Path::new(value).is_absolute() {
             diags.push(
                 Diagnostic::new(
                     Severity::Error,
