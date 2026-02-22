@@ -2262,3 +2262,114 @@ fn validate_plugin_credential_detection() {
         .failure()
         .stderr(predicate::str::contains("credential"));
 }
+
+#[test]
+fn validate_plugin_discovers_hooks() {
+    let dir = tempdir().unwrap();
+    let path = dir.path();
+    fs::write(
+        path.join("plugin.json"),
+        r#"{ "name": "test", "description": "t", "author": "x", "homepage": "x", "license": "MIT" }"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("hooks.json"),
+        r#"{ "BadEvent": [{ "hooks": [{ "type": "command", "command": "echo" }] }] }"#,
+    )
+    .unwrap();
+    aigent()
+        .args(["validate-plugin", path.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unknown event name"));
+}
+
+#[test]
+fn validate_plugin_discovers_agents() {
+    let dir = tempdir().unwrap();
+    let path = dir.path();
+    fs::write(
+        path.join("plugin.json"),
+        r#"{ "name": "test", "description": "t", "author": "x", "homepage": "x", "license": "MIT" }"#,
+    )
+    .unwrap();
+    let agents_dir = path.join("agents");
+    fs::create_dir(&agents_dir).unwrap();
+    fs::write(
+        agents_dir.join("bad.md"),
+        "---\nname: helper\nmodel: gpt-4\ncolor: orange\n---\nShort.\n",
+    )
+    .unwrap();
+    aigent()
+        .args(["validate-plugin", path.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("agents/bad.md"))
+        .stderr(predicate::str::contains("`model` is not valid"));
+}
+
+#[test]
+fn validate_plugin_discovers_commands() {
+    let dir = tempdir().unwrap();
+    let path = dir.path();
+    fs::write(
+        path.join("plugin.json"),
+        r#"{ "name": "test", "description": "t", "author": "x", "homepage": "x", "license": "MIT" }"#,
+    )
+    .unwrap();
+    let cmds_dir = path.join("commands");
+    fs::create_dir(&cmds_dir).unwrap();
+    fs::write(cmds_dir.join("empty.md"), "---\nmodel: haiku\n---\n").unwrap();
+    aigent()
+        .args(["validate-plugin", path.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("commands/empty.md"))
+        .stderr(predicate::str::contains("command body is empty"));
+}
+
+#[test]
+fn validate_plugin_json_includes_all_components() {
+    let dir = tempdir().unwrap();
+    let path = dir.path();
+    fs::write(
+        path.join("plugin.json"),
+        r#"{ "name": "test", "description": "t", "author": "x", "homepage": "x", "license": "MIT" }"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("hooks.json"),
+        r#"{ "PreToolUse": [{ "hooks": [{ "type": "command", "command": "echo" }] }] }"#,
+    )
+    .unwrap();
+    let agents_dir = path.join("agents");
+    fs::create_dir(&agents_dir).unwrap();
+    fs::write(
+        agents_dir.join("reviewer.md"),
+        "---\nname: code-reviewer\ndescription: Reviews code for quality\nmodel: sonnet\ncolor: blue\n---\nYou review code carefully and provide helpful feedback to improve quality.\n",
+    )
+    .unwrap();
+    let output = aigent()
+        .args([
+            "validate-plugin",
+            path.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let arr = json.as_array().unwrap();
+    // Should have plugin.json, hooks.json, and agents/reviewer.md
+    assert!(
+        arr.len() >= 3,
+        "expected at least 3 entries, got {}",
+        arr.len()
+    );
+    let paths: Vec<&str> = arr.iter().map(|e| e["path"].as_str().unwrap()).collect();
+    assert!(paths.contains(&"plugin.json"));
+    assert!(paths.contains(&"hooks.json"));
+    assert!(paths.iter().any(|p| p.starts_with("agents/")));
+}

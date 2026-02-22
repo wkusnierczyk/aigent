@@ -74,7 +74,9 @@ pub use parser::{
     find_skill_md, parse_frontmatter, parse_optional_frontmatter, read_body, read_properties,
     CLAUDE_CODE_KEYS, KNOWN_KEYS,
 };
-pub use plugin::{validate_manifest, PluginManifest};
+pub use plugin::{
+    validate_agent, validate_command, validate_hooks, validate_manifest, PluginManifest,
+};
 pub use prompt::{
     collect_skills, collect_skills_verbose, estimate_tokens, format_budget, format_entries,
     to_prompt, to_prompt_format, PromptFormat, SkillEntry,
