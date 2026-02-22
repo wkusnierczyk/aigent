@@ -237,7 +237,6 @@ recommendations from §5 to reduce conflict friction. Clarify the
 `read_body` empty-body behavior (§3.1) before Agent D starts.
 
 ---
----
 
 # M14: Code Review — Implementation Review
 

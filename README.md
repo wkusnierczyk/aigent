@@ -40,7 +40,7 @@ skill files so you can focus on writing the instructions rather than fighting th
   - [Validation rules](#validation-rules)
 - [Builder modes](#builder-modes)
   - [Provider detection order](#provider-detection-order)
-  - [Available models (as of 2026-02-20)](#available-models-as-of-2026-02-20)
+  - [Available models](#available-models)
 - [Compliance](#compliance)
   - [Specification coverage](#specification-coverage)
   - [`aigent` vs. `plugin-dev`](#aigent-vs-plugin-dev)
@@ -113,6 +113,14 @@ verifies its SHA-256 checksum, and extracts the binary to `~/.local/bin`.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/wkusnierczyk/aigent/main/install.sh | bash
+```
+
+Or download and review the script before running:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wkusnierczyk/aigent/main/install.sh -o install.sh
+less install.sh        # review the script
+bash install.sh
 ```
 
 ### From crates.io
@@ -305,7 +313,9 @@ independently falls back to deterministic on LLM failure.
 | 3 | `GOOGLE_API_KEY` | Google Gemini |
 | 4 | `OLLAMA_HOST` | Ollama (local) |
 
-### Available models (as of 2026-02-20)
+### Available models
+
+Default models as of 2026-02-20:
 
 | Provider | Environment Variable | Default Model | Override Variable |
 |----------|---------------------|---------------|-------------------|
