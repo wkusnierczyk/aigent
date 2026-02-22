@@ -1310,7 +1310,7 @@ git push origin v0.5.0
 
 ```
 aigent: Rust AI Agent Skills Tool
-├─ version:    0.4.0
+├─ version:    0.4.1
 ├─ author:     Wacław Kuśnierczyk
 ├─ developer:  mailto:waclaw.kusnierczyk@gmail.com
 ├─ source:     https://github.com/wkusnierczyk/aigent

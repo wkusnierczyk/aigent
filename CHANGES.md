@@ -1,5 +1,18 @@
 # Changes
 
+## [0.4.1] — 2026-02-22
+
+### Changed
+
+- Comprehensive README rewrite: added agent skills introduction, expanded
+  CLI reference with exit codes table, command flags, severity levels,
+  validation targets, and release workflow instructions; fixed incorrect
+  exit code documentation for `validate` and `check`; added backward
+  compatibility aliases table with `fmt` → `format`; added safer
+  install-script alternative; moved hard-coded date out of section
+  headings (#107)
+
+
 ## [0.4.0] — 2026-02-21
 
 ### Breaking
