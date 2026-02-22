@@ -1,5 +1,12 @@
 # Changes
 
+## [0.6.2] — 2026-02-23
+
+- Fix upgrade --apply adding non-spec fields that regress score (#146)
+- Fix build output to pass validate-plugin (#145)
+- Fix probe output: wrap long values aligned to value column (#144)
+- Add Homebrew install instructions to README (#140)
+
 ## [0.6.1] — 2026-02-22
 
 - Migrate license from MIT to Apache 2.0 (#133)
