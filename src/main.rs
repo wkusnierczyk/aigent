@@ -127,7 +127,8 @@ enum Commands {
         apply_fixes: bool,
     },
     /// Read skill properties as JSON
-    ReadProperties {
+    #[command(alias = "read-properties")]
+    Properties {
         /// Path to skill directory or SKILL.md file
         #[arg(name = "skill-dir")]
         skill_dir: PathBuf,
@@ -557,14 +558,14 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Some(Commands::ReadProperties { skill_dir }) => {
+        Some(Commands::Properties { skill_dir }) => {
             let dir = resolve_skill_dir(&skill_dir);
             match aigent::read_properties(&dir) {
                 Ok(props) => {
                     println!("{}", serde_json::to_string_pretty(&props).unwrap());
                 }
                 Err(e) => {
-                    eprintln!("aigent read-properties: {e}");
+                    eprintln!("aigent properties: {e}");
                     std::process::exit(1);
                 }
             }

@@ -65,7 +65,7 @@ skill files so you can focus on writing the instructions rather than fighting th
     - [`new` — Create a skill from natural language](#new--create-a-skill-from-natural-language)
     - [`probe` — Simulate skill activation](#probe--simulate-skill-activation)
     - [`prompt` — Generate XML prompt block](#prompt--generate-xml-prompt-block)
-    - [`read-properties` — Output skill metadata as JSON](#read-properties--output-skill-metadata-as-json)
+    - [`properties` — Output skill metadata as JSON](#properties--output-skill-metadata-as-json)
     - [`score` — Rate a skill 0–100](#score--rate-a-skill-0100)
     - [`test` — Run fixture-based test suites](#test--run-fixture-based-test-suites)
     - [`upgrade` — Detect and apply best-practice improvements](#upgrade--detect-and-apply-best-practice-improvements)
@@ -181,7 +181,7 @@ aigent build my-skill/ other-skill/ --output ./dist
 aigent doc skills/ --recursive
 
 # Read skill properties as JSON
-aigent read-properties my-skill/
+aigent properties my-skill/
 
 # Generate XML prompt for LLM injection
 aigent prompt my-skill/ other-skill/
@@ -445,7 +445,7 @@ Full API documentation is available at [docs.rs/aigent](https://docs.rs/aigent).
 <tr><td><code>new &lt;purpose&gt;</code></td><td>Create a skill from natural language</td></tr>
 <tr><td><code>probe &lt;directory&gt; &lt;query&gt;</code></td><td>Probe skill activation against a sample user query</td></tr>
 <tr><td><code>prompt &lt;dirs...&gt;</code></td><td>Generate <code>&lt;available_skills&gt;</code> XML block</td></tr>
-<tr><td><code>read-properties &lt;directory&gt;</code></td><td>Output skill properties as JSON</td></tr>
+<tr><td><code>properties &lt;directory&gt;</code></td><td>Output skill properties as JSON</td></tr>
 <tr><td><code>score &lt;directory&gt;</code></td><td>Score a skill against best-practices checklist (0–100)</td></tr>
 <tr><td><code>test &lt;dirs...&gt;</code></td><td>Run fixture-based test suites from <code>tests.yml</code></td></tr>
 <tr><td><code>upgrade &lt;directory&gt;</code></td><td>Check a skill for upgrade opportunities</td></tr>
@@ -461,6 +461,7 @@ Full API documentation is available at [docs.rs/aigent](https://docs.rs/aigent).
 > | `create` | `new` |
 > | `fmt` | `format` |
 > | `lint` | `check` |
+> | `read-properties` | `properties` |
 > | `test <dir> <query>` | `probe` |
 > | `to-prompt` | `prompt` |
 
@@ -479,7 +480,7 @@ what "success" means for each command.
 | `new` | Skill created | Build error |
 | `probe` | Always (result printed) | Parse or I/O error |
 | `prompt` | Prompt generated | No valid skills found |
-| `read-properties` | Properties printed | Parse error |
+| `properties` | Properties printed | Parse error |
 | `score` | Perfect score (100/100) | Score below 100 |
 | `test` | All test cases pass | Any test case fails |
 | `upgrade` | No suggestions, or applied successfully | Unapplied suggestions remain, or error |
@@ -795,16 +796,13 @@ $ aigent prompt skills/aigent-validator
 </available_skills>
 ```
 
-#### `read-properties` — Output skill metadata as JSON
+#### `properties` — Output skill metadata as JSON
 
 Parses the `SKILL.md` frontmatter and outputs structured JSON. Useful for
 scripting and integration with other tools.
 
-> **Note**
-> A shorter `properties` alias is planned ([#114](https://github.com/wkusnierczyk/aigent/issues/114)).
-
 ```
-$ aigent read-properties skills/aigent-validator
+$ aigent properties skills/aigent-validator
 {
   "name": "aigent-validator",
   "description": "Validates AI agent skill definitions ...",
