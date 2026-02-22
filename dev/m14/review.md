@@ -567,3 +567,25 @@ No blocking defects found in the implemented M14 code.
 
 - `scripts/version.sh` behavior is not covered by automated tests (README/CHANGES rewrite paths are only manually verified).
 - Symlink and permission behavior remains primarily Unix-tested (`#[cfg(unix)]` paths), so cross-platform edge cases still depend on manual verification.
+
+---
+
+## M14 README Review (Branch `dev/m14-105-readme`)
+
+Reviewed `main...dev/m14-105-readme` (README-focused changes).
+
+### Findings
+
+1. High: documented `properties` command does not exist
+   - `README.md` documents `properties` as the current command in multiple places (`README.md:68`, `README.md:176`, `README.md:438`, `README.md:471`, `README.md:787`, `README.md:793`).
+   - The CLI subcommand is `read-properties` (`src/main.rs:129`), and there is no alias to `properties`.
+   - Impact: copied commands fail with "unrecognized subcommand", breaking quick start and CLI reference usability.
+
+2. Medium: exit code behavior for warnings is documented incorrectly for `validate`/`check`
+   - README claims warnings cause exit 1 (`README.md:464`, `README.md:475`, `README.md:609`, `README.md:936`).
+   - Implementation exits non-zero only when errors are present (`src/main.rs:426`, `src/main.rs:556`).
+   - Impact: CI guidance is misleading; users may assume warning-only runs fail when they do not.
+
+### Summary
+
+The README rewrite is strong structurally, but it introduces two functional documentation regressions that should be corrected before merge.
