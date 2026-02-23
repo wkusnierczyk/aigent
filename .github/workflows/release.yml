@@ -168,7 +168,24 @@ jobs:
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
+          if [ -z "${HOMEBREW_TAP_TOKEN}" ]; then
+            echo "ERROR: HOMEBREW_TAP_TOKEN secret is not set" >&2
+            exit 1
+          fi
+
           VERSION=${GITHUB_REF_NAME#v}
+          if [ -z "${VERSION}" ] || [ "${VERSION}" = "${GITHUB_REF_NAME}" ]; then
+            echo "ERROR: invalid tag '${GITHUB_REF_NAME}', expected v-prefixed version" >&2
+            exit 1
+          fi
+
+          # Verify all required artifacts exist
+          for target in aarch64-apple-darwin x86_64-apple-darwin aarch64-unknown-linux-gnu x86_64-unknown-linux-gnu; do
+            if [ ! -f "artifacts/aigent-${GITHUB_REF_NAME}-${target}.tar.gz" ]; then
+              echo "ERROR: missing artifact aigent-${GITHUB_REF_NAME}-${target}.tar.gz" >&2
+              exit 1
+            fi
+          done
 
           # Compute checksums for Homebrew targets
           AARCH64_DARWIN=$(sha256sum artifacts/aigent-${GITHUB_REF_NAME}-aarch64-apple-darwin.tar.gz | cut -d' ' -f1)
@@ -181,7 +198,8 @@ jobs:
           cd tap
 
           # Update version
-          sed -i "s/version \".*\"/version \"${VERSION}\"/" Formula/aigent.rb
+          sed "s/version \".*\"/version \"${VERSION}\"/" Formula/aigent.rb > Formula/aigent.rb.tmp
+          mv Formula/aigent.rb.tmp Formula/aigent.rb
 
           # Update checksums: match each url target, replace the following sha256
           awk -v ad="$AARCH64_DARWIN" -v xd="$X86_64_DARWIN" \
@@ -190,7 +208,7 @@ jobs:
             /x86_64-apple-darwin/        { t="xd" }
             /aarch64-unknown-linux-gnu/  { t="al" }
             /x86_64-unknown-linux-gnu/   { t="xl" }
-            /sha256/ && t != "" {
+            /^\s*sha256\s+"[a-f0-9]+"/ && t != "" {
               if      (t=="ad") sub(/"[a-f0-9]+"/, "\"" ad "\"")
               else if (t=="xd") sub(/"[a-f0-9]+"/, "\"" xd "\"")
               else if (t=="al") sub(/"[a-f0-9]+"/, "\"" al "\"")
@@ -206,5 +224,5 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/aigent.rb
           git diff --cached --quiet && echo "Formula already up to date" && exit 0
-          git commit -m "aigent ${VERSION}"
+          git commit -m "Update aigent to ${VERSION}"
           git push
