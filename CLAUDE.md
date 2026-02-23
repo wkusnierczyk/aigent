@@ -42,6 +42,7 @@ cargo fmt --check                   # Check formatting
 
 - Idiomatic Rust: use `Result<T, E>`, pattern matching, iterators
 - No `unwrap()` or `expect()` in `src/lib.rs` and modules — propagate errors with `?`
+- `expect()` allowed in static initializers (e.g., `LazyLock<Regex>`) for compile-time invariants
 - `unwrap()` allowed in tests and `main.rs` for known-safe operations
 - `#[must_use]` on functions returning values that shouldn't be ignored
 - Public items must have doc comments (`///`)
