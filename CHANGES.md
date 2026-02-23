@@ -1,5 +1,9 @@
 # Changes
 
+## [0.6.9] — 2026-02-23
+
+- Clarify upgrade scope: [fix]/[info] tags, rule IDs, --dry-run (#165)
+
 ## [Unreleased]
 
 - Clarify upgrade scope: `[fix]`/`[info]` tags, rule IDs (U001–U003), `--dry-run` flag, docs (#163)
