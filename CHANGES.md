@@ -1,5 +1,9 @@
 # Changes
 
+## [0.7.0] — 2026-02-23
+
+- Improve probe/score semantics (#171)
+
 ## [0.6.10] — 2026-02-23
 
 - Improve probe/score semantics: Snowball stemmer, synonym expansion, graduated scoring, proportional structural scoring, shared trigger phrases (#168)
