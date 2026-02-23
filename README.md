@@ -4,7 +4,7 @@
       <img src="https://github.com/wkusnierczyk/aigent/raw/main/graphics/aigent.png" alt="logo" width="300" />
     </td>
     <td>
-      <p><strong><code>aigent</code></strong>: AI agent Swiss Army knife.</p>
+      <p><strong><code>aigent</code></strong>: validate, format, score, test, and build AI agent skills.</p>
       <p>A library, CLI tool, and Claude Code plugin for managing AI agent skill definitions.</p>
       <p>Validates, parses, and generates prompts from skill metadata stored in <code>SKILL.md</code> files with YAML frontmatter. 
          Provides a skill builder for creating new skills from natural language specifications.</p>
