@@ -30,6 +30,10 @@ directories — building plugins from skills with `aigent build`, and checking
 the `plugin.json` manifest, `hooks.json` configuration, agent and command files,
 skill subdirectories, and cross-component consistency with `aigent validate-plugin`.
 
+<p align="center">
+  <img src="https://github.com/wkusnierczyk/aigent/raw/main/graphics/hello.gif" alt="aigent demo" width="800" />
+</p>
+
 ## Table of contents
 
 - [Installation](#installation)
