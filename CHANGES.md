@@ -1,5 +1,9 @@
 # Changes
 
+## [0.6.10] — 2026-02-23
+
+- Add integration tests against anthropics/skills repo (#167)
+
 ## [0.6.9] — 2026-02-23
 
 - Clarify upgrade scope: [fix]/[info] tags, rule IDs, --dry-run (#165)
