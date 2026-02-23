@@ -4,6 +4,7 @@
 
 - Clarify upgrade scope: `[fix]`/`[info]` tags, rule IDs (U001–U003), `--dry-run` flag, docs (#163)
 - **Breaking:** `upgrade --format json` now emits structured suggestion objects (`code`, `kind`, `message`) instead of bare strings
+- **Breaking:** `upgrade` now exits 0 when only informational suggestions remain (previously exited 1 for any suggestion)
 
 ## [0.6.8] — 2026-02-23
 

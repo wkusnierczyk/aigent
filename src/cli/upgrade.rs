@@ -44,7 +44,7 @@ pub(crate) fn run(
 
     let dir = super::resolve_skill_dir(&skill_dir);
     match run_upgrade(&dir, apply, full) {
-        Ok((suggestions, full_messages)) => {
+        Ok((suggestions, full_messages, has_full_errors)) => {
             if suggestions.is_empty() && full_messages.is_empty() {
                 eprintln!("No upgrade suggestions — skill follows current best practices.");
             } else {
@@ -90,14 +90,19 @@ pub(crate) fn run(
                                 })
                             })
                             .collect();
-                        let json = serde_json::json!({
+                        let mut json = serde_json::json!({
                             "suggestions": json_suggestions,
                             "applied": apply,
                         });
+                        if !full_messages.is_empty() {
+                            json["diagnostics"] = serde_json::json!(full_messages);
+                        }
                         println!("{}", serde_json::to_string_pretty(&json).unwrap());
                     }
                 }
-                if !apply && suggestions.iter().any(|s| s.kind == SuggestionKind::Fix) {
+                let has_unapplied_fixes =
+                    !apply && suggestions.iter().any(|s| s.kind == SuggestionKind::Fix);
+                if has_unapplied_fixes || has_full_errors {
                     std::process::exit(1);
                 }
             }
@@ -137,9 +142,10 @@ fn run_upgrade(
     dir: &std::path::Path,
     apply: bool,
     full: bool,
-) -> std::result::Result<(Vec<Suggestion>, Vec<String>), aigent::AigentError> {
+) -> std::result::Result<(Vec<Suggestion>, Vec<String>, bool), aigent::AigentError> {
     let mut suggestions = Vec::new();
     let mut full_messages = Vec::new();
+    let mut has_full_errors = false;
 
     // Full mode: run validate + lint before upgrade analysis.
     if full {
@@ -173,6 +179,9 @@ fn run_upgrade(
 
         let errors: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
         let warnings: Vec<_> = diags.iter().filter(|d| d.is_warning()).collect();
+        if !errors.is_empty() {
+            has_full_errors = true;
+        }
         if !errors.is_empty() || !warnings.is_empty() {
             for d in &errors {
                 full_messages.push(format!("[full] error: {d}"));
@@ -244,5 +253,5 @@ fn run_upgrade(
         }
     }
 
-    Ok((suggestions, full_messages))
+    Ok((suggestions, full_messages, has_full_errors))
 }

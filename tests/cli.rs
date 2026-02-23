@@ -1479,7 +1479,54 @@ fn upgrade_info_only_exits_success() {
         .assert()
         .success()
         .stderr(predicate::str::contains("[info] U002"))
-        .stderr(predicate::str::contains("informational suggestion(s)"));
+        .stderr(predicate::str::contains("no auto-fixes available"));
+}
+
+#[test]
+fn upgrade_full_exits_failure_on_validation_errors() {
+    // Finding #1: --full must exit 1 when validate/lint reports errors,
+    // even if there are no unapplied fix suggestions.
+    let (_parent, dir) = make_skill_dir(
+        "upgrade-full-err",
+        "---\nname: UPPERCASE-NAME\ndescription: >-\n  Manages things. Use when needed.\ncompatibility: claude-code\n---\nBody.\n",
+    );
+    aigent()
+        .args(["upgrade", dir.to_str().unwrap(), "--full"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("[full] error"));
+}
+
+#[test]
+fn upgrade_full_json_includes_diagnostics() {
+    // Finding #2: --full --format json must include full-mode diagnostics.
+    let (_parent, dir) = make_skill_dir(
+        "upgrade-full-json",
+        "---\nname: UPPERCASE-JSON\ndescription: >-\n  Manages things. Use when needed.\ncompatibility: claude-code\n---\nBody.\n",
+    );
+    let output = aigent()
+        .args([
+            "upgrade",
+            dir.to_str().unwrap(),
+            "--full",
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert!(
+        parsed["diagnostics"].is_array(),
+        "JSON output missing 'diagnostics' field when --full produces errors"
+    );
+    let diags = parsed["diagnostics"].as_array().unwrap();
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.as_str().unwrap_or("").contains("[full] error")),
+        "diagnostics should contain [full] error entries"
+    );
 }
 
 // ── M13: CLI renames and aliases (#76) ───────────────────────────
