@@ -30,7 +30,10 @@ const GENERIC_SEGMENTS: &[&str] = &[
 ];
 
 /// Trigger phrases that indicate when a skill should be used.
-const TRIGGER_PHRASES: &[&str] = &[
+///
+/// Shared across linter, tester, and upgrade modules to ensure consistent
+/// trigger phrase detection.
+pub const TRIGGER_PHRASES: &[&str] = &[
     "use when",
     "use for",
     "use this",

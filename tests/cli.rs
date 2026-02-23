@@ -1189,7 +1189,7 @@ fn doc_recursive_discovers_nested_skills() {
 fn probe_skill_shows_activation_status() {
     let (_parent, dir) = make_skill_dir(
         "test-skill-activate",
-        "---\nname: test-skill-activate\ndescription: Processes PDF files and extracts text\n---\nBody.\n",
+        "---\nname: test-skill-activate\ndescription: Processes PDF files and extracts text. Use when working with PDF documents.\n---\nBody.\n",
     );
     aigent()
         .args([

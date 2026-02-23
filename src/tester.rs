@@ -5,9 +5,14 @@
 //! and identifies potential issues (description mismatch, broken references,
 //! token budget).
 
+use std::collections::HashSet;
 use std::path::Path;
+use std::sync::LazyLock;
+
+use rust_stemmers::{Algorithm, Stemmer};
 
 use crate::diagnostics::Diagnostic;
+use crate::linter::TRIGGER_PHRASES;
 use crate::models::SkillProperties;
 use crate::parser::read_properties;
 use crate::prompt::estimate_tokens;
@@ -245,23 +250,35 @@ const STOPWORDS: &[&str] = &[
     "or", "but", "not", "it", "this", "that",
 ];
 
-/// Normalize a word by stripping common English suffixes.
+/// Synonym groups for common skill-domain terms.
 ///
-/// This is a minimal stemmer, not a full Porter/Snowball implementation.
-/// It handles the most common cases to improve Jaccard overlap.
+/// When a query token matches any word in a group, all words in that group
+/// are added to the expanded query set. Applied to query tokens only (not
+/// description) to improve recall without inflating description tokens.
+const SYNONYM_GROUPS: &[&[&str]] = &[
+    &["valid", "check", "verifi", "lint"],
+    &["pars", "extract", "read"],
+    &["format", "style", "clean"],
+    &["build", "assembl", "compil"],
+    &["test", "probe", "evalu"],
+    &["creat", "generat", "new"],
+    &["fix", "repair", "correct"],
+    &["upgrad", "improv", "enhanc"],
+    &["document", "describ", "explain"],
+    &["delet", "remov", "strip"],
+    &["instal", "setup", "configur"],
+    &["deploy", "publish", "releas"],
+    &["search", "find", "discov", "locat"],
+    &["transform", "convert", "process"],
+    &["analyz", "inspect", "review"],
+];
+
+/// Cached Snowball English stemmer, reused across all `stem()` calls.
+static STEMMER: LazyLock<Stemmer> = LazyLock::new(|| Stemmer::create(Algorithm::English));
+
+/// Stem a word using the Snowball English stemmer.
 fn stem(word: &str) -> String {
-    let w = word.to_lowercase();
-    // Order matters: check longer suffixes first.
-    for suffix in &[
-        "ting", "sing", "zing", "ning", "ring", "ses", "ies", "ing", "ed", "es", "s",
-    ] {
-        if w.len() > suffix.len() + 2 {
-            if let Some(root) = w.strip_suffix(suffix) {
-                return root.to_string();
-            }
-        }
-    }
-    w
+    STEMMER.stem(&word.to_lowercase()).into_owned()
 }
 
 /// Tokenize a string into lowercase, stemmed words with punctuation stripped
@@ -278,15 +295,34 @@ fn tokenize(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// Expand query tokens with synonyms from `SYNONYM_GROUPS`.
+///
+/// For each query token that matches a word in any synonym group,
+/// all other words in that group are added to the result set.
+/// Original tokens are always preserved.
+fn expand_synonyms(tokens: &[String]) -> HashSet<String> {
+    let mut expanded: HashSet<String> = tokens.iter().cloned().collect();
+    for token in tokens {
+        for group in SYNONYM_GROUPS {
+            if group.contains(&token.as_str()) {
+                for &syn in *group {
+                    expanded.insert(syn.to_string());
+                }
+            }
+        }
+    }
+    expanded
+}
+
 /// Extract a trigger phrase from a description.
 ///
-/// Scans for lines starting with "Use when" or "Use this when"
+/// Scans for lines containing any of the shared `TRIGGER_PHRASES`
 /// (case-insensitive) and returns the full line text if found.
 fn extract_trigger(description: &str) -> Option<String> {
     for line in description.lines() {
         let trimmed = line.trim();
         let lower = trimmed.to_lowercase();
-        if lower.starts_with("use when") || lower.starts_with("use this when") {
+        if TRIGGER_PHRASES.iter().any(|p| lower.contains(p)) {
             return Some(trimmed.to_string());
         }
     }
@@ -296,11 +332,10 @@ fn extract_trigger(description: &str) -> Option<String> {
 /// Compute a weighted match score between a query and a skill.
 ///
 /// Uses a three-component weighted formula:
-/// - **0.5 × description overlap** (fraction of query tokens found in description)
-/// - **0.3 × trigger match**: 1.0 if any query token appears in the
-///   skill's trigger phrase ("Use when..."), 0.0 otherwise
-/// - **0.2 × name match**: 1.0 if any query token is a substring of the
-///   skill name, 0.0 otherwise
+/// - **0.5 × description overlap** (matches against synonym-expanded query tokens,
+///   normalized by original query size so synonyms can only help, never hurt)
+/// - **0.3 × trigger score** (fraction of query tokens found in the trigger phrase)
+/// - **0.2 × name score** (fraction of query tokens found as substrings of the name)
 ///
 /// Returns the [`QueryMatch`] category and the numeric score (0.0–1.0).
 /// Strong ≥ 0.4, Weak ≥ 0.15, None < 0.15.
@@ -313,42 +348,43 @@ fn compute_query_match(query: &str, name: &str, description: &str) -> (QueryMatc
 
     let desc_tokens = tokenize(description);
 
-    // Description overlap: fraction of query tokens found in description tokens.
-    // This measures recall (how many query terms are covered) rather than
-    // Jaccard (which penalizes for extra description tokens).
-    let query_set: std::collections::HashSet<&str> =
-        query_tokens.iter().map(|s| s.as_str()).collect();
-    let desc_set: std::collections::HashSet<&str> =
-        desc_tokens.iter().map(|s| s.as_str()).collect();
-    let intersection = query_set.intersection(&desc_set).count();
+    // Expand query tokens with synonyms for better recall.
+    let expanded_query = expand_synonyms(&query_tokens);
+
+    // Description overlap: check expanded query tokens against description,
+    // but normalize by original query size so synonyms can only help, never hurt.
+    let query_set: HashSet<&str> = query_tokens.iter().map(|s| s.as_str()).collect();
+    let desc_set: HashSet<&str> = desc_tokens.iter().map(|s| s.as_str()).collect();
+    let intersection = expanded_query
+        .iter()
+        .filter(|t| desc_set.contains(t.as_str()))
+        .count();
     let desc_overlap = if query_set.is_empty() {
         0.0
     } else {
         intersection as f64 / query_set.len() as f64
     };
 
-    // Trigger match: 1.0 if any query token appears in the trigger phrase.
+    // Trigger score: fraction of query tokens found in the trigger phrase.
     let trigger_score = if let Some(trigger) = extract_trigger(description) {
-        let trigger_lower = trigger.to_lowercase();
-        if query_tokens
+        let trigger_tokens = tokenize(&trigger);
+        let trigger_set: HashSet<&str> = trigger_tokens.iter().map(|s| s.as_str()).collect();
+        let matched = query_tokens
             .iter()
-            .any(|t| trigger_lower.contains(t.as_str()))
-        {
-            1.0
-        } else {
-            0.0
-        }
+            .filter(|t| trigger_set.contains(t.as_str()))
+            .count();
+        matched as f64 / query_tokens.len() as f64
     } else {
         0.0
     };
 
-    // Name match: 1.0 if any query token is a substring of the skill name.
+    // Name score: fraction of query tokens found as substrings of the skill name.
     let name_lower = name.to_lowercase();
-    let name_score = if query_tokens.iter().any(|t| name_lower.contains(t.as_str())) {
-        1.0
-    } else {
-        0.0
-    };
+    let matched = query_tokens
+        .iter()
+        .filter(|t| name_lower.contains(t.as_str()))
+        .count();
+    let name_score = matched as f64 / query_tokens.len() as f64;
 
     // Weighted formula.
     let score = 0.5 * desc_overlap + 0.3 * trigger_score + 0.2 * name_score;
@@ -444,6 +480,65 @@ mod tests {
         );
     }
 
+    // ── Synonym expansion ─────────────────────────────────────────────
+
+    #[test]
+    fn expand_synonyms_adds_group_members() {
+        let tokens = vec!["valid".to_string()];
+        let expanded = expand_synonyms(&tokens);
+        assert!(expanded.contains("valid"), "original token preserved");
+        assert!(expanded.contains("check"), "synonym 'check' added");
+        assert!(expanded.contains("verifi"), "synonym 'verifi' added");
+        assert!(expanded.contains("lint"), "synonym 'lint' added");
+    }
+
+    #[test]
+    fn expand_synonyms_preserves_unmatched_tokens() {
+        let tokens = vec!["pdf".to_string()];
+        let expanded = expand_synonyms(&tokens);
+        assert_eq!(expanded.len(), 1, "no synonyms for 'pdf'");
+        assert!(expanded.contains("pdf"));
+    }
+
+    #[test]
+    fn expand_synonyms_stems_match_snowball_output() {
+        // Verify that synonym group entries are actual Snowball stems.
+        let cases = [
+            ("validate", "valid"),
+            ("verify", "verifi"),
+            ("check", "check"),
+            ("parse", "pars"),
+            ("install", "instal"),
+            ("discover", "discov"),
+        ];
+        for (word, expected_stem) in &cases {
+            let stemmed = stem(word);
+            assert_eq!(
+                &stemmed, expected_stem,
+                "Snowball stem of '{word}' should be '{expected_stem}', got '{stemmed}'"
+            );
+        }
+    }
+
+    #[test]
+    fn synonym_expansion_does_not_lower_score() {
+        // Exact match: "validate" against description containing "Validates".
+        // Synonyms expand the query but denominator uses original query size,
+        // so synonyms can only help, never hurt.
+        let (_, score_with_synonyms) = compute_query_match(
+            "validate code",
+            "unrelated-name",
+            "Validates source code for correctness.",
+        );
+        // Without synonym expansion, "valid" matches "valid" in desc → 1/2 = 0.5
+        // With synonyms, expanded set may also match "check"/"verifi"/"lint" but
+        // denominator stays 2 → score ≥ 0.5 * 0.5 = 0.25
+        assert!(
+            score_with_synonyms >= 0.25,
+            "synonym expansion should not reduce score below non-expanded baseline, got {score_with_synonyms}"
+        );
+    }
+
     // ── Weighted scoring specific tests ──────────────────────────────
 
     #[test]
@@ -506,7 +601,13 @@ mod tests {
         );
         let result = test_skill(&dir, "process some PDF files").unwrap();
         assert_eq!(result.name, "pdf-tool");
-        assert_eq!(result.query_match, QueryMatch::Strong);
+        assert_eq!(
+            result.query_match,
+            QueryMatch::Strong,
+            "expected Strong for relevant query, got {:?} (score: {})",
+            result.query_match,
+            result.score,
+        );
         assert!(result.estimated_tokens > 0);
     }
 

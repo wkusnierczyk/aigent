@@ -412,8 +412,9 @@ match score (best first).
 
 Uses a **weighted formula** to compute a match score (0.0–1.0):
 - **0.5 × description overlap** — fraction of query tokens in description
-- **0.3 × trigger score** — match against trigger phrases ("Use when...")
-- **0.2 × name score** — query-to-name token overlap
+  (with synonym expansion on the query side)
+- **0.3 × trigger score** — fraction of query tokens found in trigger phrase
+- **0.2 × name score** — fraction of query tokens matching the skill name
 
 Categories based on weighted score:
 - **Strong** (≥ 0.4) — skill would reliably activate
@@ -421,6 +422,11 @@ Categories based on weighted score:
 - **None** (< 0.15) — skill would not activate for this query
 
 Also reports estimated token cost and any validation issues.
+
+> **Limitations:** Lexical matching only — no synonym/paraphrase handling
+> beyond a small built-in synonym table. The Snowball stemmer handles common
+> English inflections but not irregular forms. Scores reflect token overlap,
+> not semantic similarity.
 
 Single directory:
 
@@ -503,10 +509,10 @@ $ aigent properties skills/aigent-validator
 Rates a skill from 0 to 100 against the Anthropic best-practices checklist.
 The score has two weighted categories:
 
-- **Structural (60 points)** — Checks that the `SKILL.md` parses correctly, the
-  name matches the directory, required fields are present, no unknown fields
-  exist, and the body is within size limits. All six checks must pass to earn
-  the 60 points; any failure zeros the structural score.
+- **Structural (60 points)** — Six checks worth 10 points each: `SKILL.md`
+  parses correctly, name matches the directory, description is valid, required
+  fields are present, no unknown fields exist, and body is within size limits.
+  Each passing check independently earns 10 points.
 
 - **Quality (40 points)** — Five semantic lint checks worth 8 points each:
   third-person description, trigger phrase (`"Use when..."`), gerund name form
@@ -515,6 +521,11 @@ The score has two weighted categories:
 
 The exit code is 0 for a perfect score and 1 otherwise, making it suitable for
 CI gating.
+
+> **Limitations:** The structural category scores proportionally (10 per
+> check). Quality checks are surface-level heuristics (trigger phrase
+> presence, gerund form, description length) — not content quality
+> assessment. The body is not evaluated beyond size limits.
 
 **Example** — a skill that passes all checks:
 
@@ -540,13 +551,14 @@ Quality (40/40):
 
 **Example** — a skill with issues. Each check shows a distinct label for its
 pass/fail state (e.g., "No unknown fields" when passing, "Unknown fields
-found" when failing):
+found" when failing). Structural scoring is proportional — one failing check
+loses 10 points, not the full 60:
 
 ```
 $ aigent score aigent-validator/
-Score: 32/100
+Score: 82/100
 
-Structural (0/60):
+Structural (50/60):
   [PASS] SKILL.md exists and is parseable
   [PASS] Name format valid
   [PASS] Description valid
