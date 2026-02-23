@@ -17,7 +17,7 @@ It ships as a native CLI (Homebrew, crates.io, pre-built binaries for Linux/macO
 The project was developed with rigorous engineering discipline — milestone-driven planning, structured code reviews, and comprehensive test coverage (500+ tests across unit, integration, and plugin levels). Claude was used extensively at every stage of the development cycle: architecture, implementation, review, and documentation. `aigent` is itself a product of the Claude ecosystem.
 
 Demo: https://github.com/wkusnierczyk/aigent#readme (GIF in the README)  
-Blog post: [TODO: dev.to link]  
+Blog post: https://dev.to/wkusnierczyk/aigent-toolchain-for-ai-agent-skills-3hib  
 Repository: https://github.com/wkusnierczyk/aigent  
 Crate: https://crates.io/crates/aigent
 
@@ -47,7 +47,7 @@ It's fully compliant with the specification and goes beyond the Python reference
 Install: `brew install wkusnierczyk/aigent/aigent` or `cargo install aigent`
 
 - GitHub: https://github.com/wkusnierczyk/aigent
-- Blog post: [TODO: dev.to link]
+- Blog post: https://dev.to/wkusnierczyk/aigent-toolchain-for-ai-agent-skills-3hib
 
 Feedback welcome!
 

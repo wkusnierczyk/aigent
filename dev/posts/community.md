@@ -22,7 +22,7 @@ Fully compliant with the Anthropic specification. Designed to complement `plugin
 Ships as a native CLI, Rust library, and Claude Code plugin. Built entirely with Claude.
 
 - GitHub: https://github.com/wkusnierczyk/aigent
-- Blog post: [TODO: dev.to link]
+- Blog post: https://dev.to/wkusnierczyk/aigent-toolchain-for-ai-agent-skills-3hib
 
 `brew install wkusnierczyk/aigent/aigent` or `cargo install aigent`
 
@@ -52,7 +52,7 @@ The project was milestone-driven (15 milestones from scaffolding to plugin ecosy
 - GitHub: https://github.com/wkusnierczyk/aigent
 - crates.io: https://crates.io/crates/aigent
 - docs.rs: https://docs.rs/aigent
-- Blog post: [TODO: dev.to link]
+- Blog post: https://dev.to/wkusnierczyk/aigent-toolchain-for-ai-agent-skills-3hib
 
 It's feature-rich but still early stage. Would especially value code reviews from experienced Rust engineers — the entire codebase is open and I'd welcome PRs, issues, or just candid feedback on the code, the CLI design, or the project approach.
 
@@ -72,7 +72,7 @@ It validates, formats, scores, tests, and assembles SKILL.md files, and validate
 
 Fully compliant with the specification. 500+ tests. Single binary for Linux, macOS, Windows. Apache 2.0.
 
-Blog post: [TODO: dev.to link]
+Blog post: https://dev.to/wkusnierczyk/aigent-toolchain-for-ai-agent-skills-3hib
 
 ---
 

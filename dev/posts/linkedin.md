@@ -21,7 +21,7 @@ Fully compliant with the Anthropic specification. Complements Anthropic's own pl
 
 Built with Claude at every stage of the development cycle.
 
-Blog post: [TODO: dev.to link]  
+Blog post: https://dev.to/wkusnierczyk/aigent-toolchain-for-ai-agent-skills-3hib  
 GitHub: https://github.com/wkusnierczyk/aigent  
 Crate: https://crates.io/crates/aigent
 

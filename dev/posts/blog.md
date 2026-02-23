@@ -18,6 +18,8 @@ The specification defines *what* a valid skill looks like. The [Python reference
 
 It covers the full skill lifecycle:
 
+**Create** — Generate skills from natural language with `aigent new`. Deterministic by default, with optional LLM enhancement (Anthropic, OpenAI, Google, Ollama backends). Produces a complete `SKILL.md` directory ready for validation and refinement.
+
 **Validate** — Check skills against the specification with typed diagnostics, error codes, and JSON output. Run `aigent validate` in CI to catch problems before they reach production. Three severity levels (error, warning, info) and a `--format json` flag for machine consumption.
 
 **Format** — Canonical YAML key ordering, consistent whitespace, idempotent output. `aigent format --check` returns non-zero when files need formatting — drop it into a pre-commit hook.
@@ -26,7 +28,7 @@ It covers the full skill lifecycle:
 
 **Test** — Fixture-based testing from `tests.yml`. Define input queries, expected match/no-match results, and minimum score thresholds. `aigent test` runs the suite and reports pass/fail. `aigent probe` does single-query dry-runs: "if a user said *this*, would the agent pick up *that* skill?"
 
-**Build** — Generate skills from natural language (deterministic or LLM-enhanced with Anthropic, OpenAI, Google, and Ollama backends). Assemble skills into Claude Code plugins with `aigent build`. Validate entire plugin directories — manifest, hooks, agents, commands, skills, and cross-component consistency — with `aigent validate-plugin`.
+**Build** — Assemble skills into Claude Code plugins with `aigent build`. Validate entire plugin directories — manifest, hooks, agents, commands, skills, and cross-component consistency — with `aigent validate-plugin`.
 
 ![aigent demo](https://github.com/wkusnierczyk/aigent/raw/main/graphics/hello.gif)
 
