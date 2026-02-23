@@ -1,5 +1,10 @@
 # Changes
 
+## [0.6.5] — 2026-02-23
+
+- Remove dev/ from repo, move plugin-dev.md to docs/ (#157)
+- Address review items #1, #6, #8: tagline, See also, README split (#156)
+
 ## [0.6.4] — 2026-02-23
 
 - Add demo video and README embed (#155)
