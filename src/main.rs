@@ -78,6 +78,7 @@ impl From<PromptOutputFormat> for aigent::prompt::PromptFormat {
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]
 enum Commands {
     /// Validate skill directories (spec conformance)
     Validate {
