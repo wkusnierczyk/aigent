@@ -1,5 +1,9 @@
 # Changes
 
+## [0.6.4] — 2026-02-23
+
+- Add demo video and README embed (#155)
+
 ## [0.6.3] — 2026-02-23
 
 - Improve --help output: sort commands, show 'format' as primary name (#150)
