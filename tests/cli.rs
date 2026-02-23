@@ -1295,6 +1295,7 @@ fn upgrade_detects_missing_compatibility() {
         .args(["upgrade", dir.to_str().unwrap()])
         .assert()
         .failure()
+        .stderr(predicate::str::contains("[fix] U001"))
         .stderr(predicate::str::contains("compatibility"));
 }
 
@@ -1308,6 +1309,7 @@ fn upgrade_detects_missing_trigger_phrase() {
         .args(["upgrade", dir.to_str().unwrap()])
         .assert()
         .failure()
+        .stderr(predicate::str::contains("[info] U002"))
         .stderr(predicate::str::contains("trigger phrase"));
 }
 
@@ -1351,6 +1353,7 @@ fn upgrade_full_reports_suggestions() {
         .args(["upgrade", dir.to_str().unwrap(), "--full"])
         .assert()
         .failure()
+        .stderr(predicate::str::contains("[fix] U001"))
         .stderr(predicate::str::contains("compatibility"));
 }
 
@@ -1391,6 +1394,138 @@ fn upgrade_apply_does_not_regress_score() {
     assert!(
         !stderr.contains("Unknown fields found"),
         "upgrade --apply should not introduce unknown fields:\n{stderr}",
+    );
+}
+
+#[test]
+fn upgrade_summary_counts_fixes_and_info_separately() {
+    let (_parent, dir) = make_skill_dir(
+        "upgrade-summary",
+        "---\nname: upgrade-summary\ndescription: A basic skill\n---\nBody.\n",
+    );
+    aigent()
+        .args(["upgrade", dir.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("1 fix(es)"))
+        .stderr(predicate::str::contains("informational suggestion(s)"));
+}
+
+#[test]
+fn upgrade_dry_run_accepted() {
+    let (_parent, dir) = make_skill_dir(
+        "upgrade-dry-run",
+        "---\nname: upgrade-dry-run\ndescription: A basic skill\n---\nBody.\n",
+    );
+    // --dry-run is equivalent to no flags (default is dry-run).
+    aigent()
+        .args(["upgrade", dir.to_str().unwrap(), "--dry-run"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("[fix] U001"));
+}
+
+#[test]
+fn upgrade_dry_run_conflicts_with_apply() {
+    let (_parent, dir) = make_skill_dir(
+        "upgrade-conflict",
+        "---\nname: upgrade-conflict\ndescription: A basic skill\n---\nBody.\n",
+    );
+    aigent()
+        .args(["upgrade", dir.to_str().unwrap(), "--dry-run", "--apply"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
+}
+
+#[test]
+fn upgrade_json_output_has_structured_suggestions() {
+    let (_parent, dir) = make_skill_dir(
+        "upgrade-json",
+        "---\nname: upgrade-json\ndescription: A basic skill\n---\nBody.\n",
+    );
+    let output = aigent()
+        .args(["upgrade", dir.to_str().unwrap(), "--format", "json"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let suggestions = parsed["suggestions"].as_array().unwrap();
+    assert!(!suggestions.is_empty());
+    // Each suggestion should have code, kind, message fields.
+    for s in suggestions {
+        assert!(s["code"].is_string(), "suggestion missing 'code' field");
+        assert!(s["kind"].is_string(), "suggestion missing 'kind' field");
+        assert!(
+            s["message"].is_string(),
+            "suggestion missing 'message' field"
+        );
+    }
+    // U001 should be kind "fix".
+    let u001 = suggestions.iter().find(|s| s["code"] == "U001");
+    assert!(u001.is_some(), "U001 not found in suggestions");
+    assert_eq!(u001.unwrap()["kind"], "fix");
+}
+
+#[test]
+fn upgrade_info_only_exits_success() {
+    // When only informational suggestions remain (no fixes), exit 0.
+    let (_parent, dir) = make_skill_dir(
+        "upgrade-info-only",
+        "---\nname: upgrade-info-only\ndescription: A basic skill\ncompatibility: claude-code\n---\nBody.\n",
+    );
+    aigent()
+        .args(["upgrade", dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("[info] U002"))
+        .stderr(predicate::str::contains("no auto-fixes available"));
+}
+
+#[test]
+fn upgrade_full_exits_failure_on_validation_errors() {
+    // Finding #1: --full must exit 1 when validate/lint reports errors,
+    // even if there are no unapplied fix suggestions.
+    let (_parent, dir) = make_skill_dir(
+        "upgrade-full-err",
+        "---\nname: UPPERCASE-NAME\ndescription: >-\n  Manages things. Use when needed.\ncompatibility: claude-code\n---\nBody.\n",
+    );
+    aigent()
+        .args(["upgrade", dir.to_str().unwrap(), "--full"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("[full] error"));
+}
+
+#[test]
+fn upgrade_full_json_includes_diagnostics() {
+    // Finding #2: --full --format json must include full-mode diagnostics.
+    let (_parent, dir) = make_skill_dir(
+        "upgrade-full-json",
+        "---\nname: UPPERCASE-JSON\ndescription: >-\n  Manages things. Use when needed.\ncompatibility: claude-code\n---\nBody.\n",
+    );
+    let output = aigent()
+        .args([
+            "upgrade",
+            dir.to_str().unwrap(),
+            "--full",
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert!(
+        parsed["diagnostics"].is_array(),
+        "JSON output missing 'diagnostics' field when --full produces errors"
+    );
+    let diags = parsed["diagnostics"].as_array().unwrap();
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.as_str().unwrap_or("").contains("[full] error")),
+        "diagnostics should contain [full] error entries"
     );
 }
 

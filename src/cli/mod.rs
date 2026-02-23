@@ -258,9 +258,12 @@ enum Commands {
         /// Path to skill directory or SKILL.md file [default: .]
         #[arg(name = "skill-dir", default_value = ".")]
         skill_dir: PathBuf,
-        /// Apply automatic upgrades
+        /// Apply automatic upgrades (fix-kind suggestions only)
         #[arg(long)]
         apply: bool,
+        /// Preview suggestions without modifying files (default behavior)
+        #[arg(long, conflicts_with = "apply")]
+        dry_run: bool,
         /// Run validate + lint before upgrade (with --apply, also fix errors first)
         #[arg(long)]
         full: bool,
@@ -385,9 +388,10 @@ pub fn run(cli: Cli) {
         Some(Commands::Upgrade {
             skill_dir,
             apply,
+            dry_run,
             full,
             format,
-        }) => upgrade::run(skill_dir, apply, full, format),
+        }) => upgrade::run(skill_dir, apply, dry_run, full, format),
         Some(Commands::Format {
             skill_dirs,
             check,
