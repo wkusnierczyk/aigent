@@ -4,7 +4,7 @@
 
 **Title:** `aigent` — a Rust toolchain for Agent Skills (validate, format, score, test, build)
 
-I built `aigent`, an open-source tool that implements the Agent Skills specification as a full development toolchain.
+Check out `aigent`, an open-source tool that implements the Agent Skills specification as a full development toolchain.
 
 If you're writing skills for Claude Code, you know the format: `SKILL.md` with YAML frontmatter. Simple to write one. Harder to keep dozens consistent across teams and CI pipelines.
 
@@ -26,7 +26,7 @@ Ships as a native CLI, Rust library, and Claude Code plugin. Built entirely with
 
 `brew install wkusnierczyk/aigent/aigent` or `cargo install aigent`
 
-Feedback welcome — especially on what's missing or could be improved.
+It's feature-rich but still early stage — feedback welcome, especially on what's missing or could be improved.
 
 ---
 
@@ -34,7 +34,7 @@ Feedback welcome — especially on what's missing or could be improved.
 
 **Title:** `aigent` — Rust CLI for validating, formatting, scoring, and testing AI agent skill files
 
-I've been building `aigent`, a Rust CLI + library for working with AI agent skill definitions (`SKILL.md` files with YAML frontmatter). It implements the Agent Skills open standard (originally from Anthropic for Claude Code).
+Check out `aigent`, a Rust CLI + library for working with AI agent skill definitions (`SKILL.md` files with YAML frontmatter). It implements the Agent Skills open standard (originally from Anthropic for Claude Code).
 
 The tool covers the full lifecycle: validation with typed diagnostics and error codes, idempotent formatting, a weighted 0-100 quality scorer, fixture-based testing, skill generation (deterministic or LLM-enhanced), and plugin assembly. It also validates entire Claude Code plugin directories — manifest, hooks, agents, commands, skills, and cross-component consistency.
 
@@ -54,7 +54,7 @@ The project was milestone-driven (15 milestones from scaffolding to plugin ecosy
 - docs.rs: https://docs.rs/aigent
 - Blog post: [TODO: dev.to link]
 
-Would love feedback from the Rust community — on the code, the CLI design, or the project approach.
+It's feature-rich but still early stage. Would especially value code reviews from experienced Rust engineers — the entire codebase is open and I'd welcome PRs, issues, or just candid feedback on the code, the CLI design, or the project approach.
 
 ---
 

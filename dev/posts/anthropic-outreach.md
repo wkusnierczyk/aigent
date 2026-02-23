@@ -6,7 +6,7 @@ Subject: `aigent` — open-source toolchain for the Agent Skills specification
 
 Hi,
 
-I'd like to introduce `aigent`, an open-source toolchain built to be fully compliant with the Anthropic agent skill specification. It's designed to complement — not compete with — Anthropic's own tooling: `plugin-dev` teaches the patterns, `aigent` enforces them deterministically.
+I'd like to introduce `aigent`, an open-source toolchain built to be fully compliant with the Anthropic agent skill specification. It's designed to complement Anthropic's own tooling: `plugin-dev` teaches the patterns, `aigent` enforces them deterministically.
 
 `aigent` implements every validation rule from the specification, reconciles cases where the specification and the Python reference implementation diverge, and adds checks that go beyond both (Unicode NFKC normalization, symlink safety, path traversal guards, post-build validation). It provides deterministic validation, formatting, scoring, testing, and plugin assembly for `SKILL.md` files — the kind of infrastructure that lets teams enforce skill quality in CI, pre-commit hooks, and build pipelines.
 
