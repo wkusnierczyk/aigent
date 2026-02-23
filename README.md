@@ -327,7 +327,7 @@ ecosystem (7 component types, ~21,000 words of guidance).
 
 Use `plugin-dev` to learn patterns; use `aigent` to enforce them.
 
-For a complete comparison, see [dev/plugin-dev.md](dev/plugin-dev.md).
+For a complete comparison, see [docs/plugin-dev.md](docs/plugin-dev.md).
 
 ### Extras
 

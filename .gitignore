@@ -13,6 +13,9 @@ target/
 # Raku build cache
 lib/
 
+# Internal development notes (kept locally, not in repo)
+.dev/
+
 # OS files
 .DS_Store
 Thumbs.db
