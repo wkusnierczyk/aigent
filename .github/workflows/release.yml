@@ -152,3 +152,59 @@ jobs:
       - run: cargo publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  homebrew:
+    name: Update Homebrew formula
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Update formula and push
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+
+          # Compute checksums for Homebrew targets
+          AARCH64_DARWIN=$(sha256sum artifacts/aigent-${GITHUB_REF_NAME}-aarch64-apple-darwin.tar.gz | cut -d' ' -f1)
+          X86_64_DARWIN=$(sha256sum artifacts/aigent-${GITHUB_REF_NAME}-x86_64-apple-darwin.tar.gz | cut -d' ' -f1)
+          AARCH64_LINUX=$(sha256sum artifacts/aigent-${GITHUB_REF_NAME}-aarch64-unknown-linux-gnu.tar.gz | cut -d' ' -f1)
+          X86_64_LINUX=$(sha256sum artifacts/aigent-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz | cut -d' ' -f1)
+
+          # Clone homebrew tap
+          git clone https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/wkusnierczyk/homebrew-aigent.git tap
+          cd tap
+
+          # Update version
+          sed -i "s/version \".*\"/version \"${VERSION}\"/" Formula/aigent.rb
+
+          # Update checksums: match each url target, replace the following sha256
+          awk -v ad="$AARCH64_DARWIN" -v xd="$X86_64_DARWIN" \
+              -v al="$AARCH64_LINUX"  -v xl="$X86_64_LINUX" '
+            /aarch64-apple-darwin/       { t="ad" }
+            /x86_64-apple-darwin/        { t="xd" }
+            /aarch64-unknown-linux-gnu/  { t="al" }
+            /x86_64-unknown-linux-gnu/   { t="xl" }
+            /sha256/ && t != "" {
+              if      (t=="ad") sub(/"[a-f0-9]+"/, "\"" ad "\"")
+              else if (t=="xd") sub(/"[a-f0-9]+"/, "\"" xd "\"")
+              else if (t=="al") sub(/"[a-f0-9]+"/, "\"" al "\"")
+              else if (t=="xl") sub(/"[a-f0-9]+"/, "\"" xl "\"")
+              t=""
+            }
+            { print }
+          ' Formula/aigent.rb > Formula/aigent.rb.tmp
+          mv Formula/aigent.rb.tmp Formula/aigent.rb
+
+          # Commit and push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/aigent.rb
+          git diff --cached --quiet && echo "Formula already up to date" && exit 0
+          git commit -m "aigent ${VERSION}"
+          git push
