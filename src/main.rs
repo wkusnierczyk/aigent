@@ -252,8 +252,8 @@ enum Commands {
         format: Format,
     },
     /// Format SKILL.md files (canonical key order, clean whitespace)
-    #[command(alias = "format")]
-    Fmt {
+    #[command(alias = "fmt")]
+    Format {
         /// Paths to skill directories or SKILL.md files [default: .]
         #[arg(default_value = ".")]
         skill_dirs: Vec<PathBuf>,
@@ -998,7 +998,7 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Fmt {
+        Some(Commands::Format {
             skill_dirs,
             check,
             recursive,
