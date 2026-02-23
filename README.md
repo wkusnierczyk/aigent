@@ -302,6 +302,10 @@ Three-way comparison of the
 (Unicode NFKC normalization, path canonicalization, post-build validation) that
 go beyond both the specification and the reference implementation.
 
+`aigent` is integration-tested against the
+[Anthropic skill collection](https://github.com/anthropics/skills)
+(12 Apache 2.0-licensed skills).
+
 ### `aigent` vs. `plugin-dev`
 
 Anthropic's **`plugin-dev`** plugin (bundled with Claude Code) and **`aigent`**
