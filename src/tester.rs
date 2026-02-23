@@ -7,6 +7,7 @@
 
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::LazyLock;
 
 use rust_stemmers::{Algorithm, Stemmer};
 
@@ -272,10 +273,12 @@ const SYNONYM_GROUPS: &[&[&str]] = &[
     &["analyz", "inspect", "review"],
 ];
 
+/// Cached Snowball English stemmer, reused across all `stem()` calls.
+static STEMMER: LazyLock<Stemmer> = LazyLock::new(|| Stemmer::create(Algorithm::English));
+
 /// Stem a word using the Snowball English stemmer.
 fn stem(word: &str) -> String {
-    let stemmer = Stemmer::create(Algorithm::English);
-    stemmer.stem(&word.to_lowercase()).into_owned()
+    STEMMER.stem(&word.to_lowercase()).into_owned()
 }
 
 /// Tokenize a string into lowercase, stemmed words with punctuation stripped
@@ -329,8 +332,8 @@ fn extract_trigger(description: &str) -> Option<String> {
 /// Compute a weighted match score between a query and a skill.
 ///
 /// Uses a three-component weighted formula:
-/// - **0.5 × description overlap** (fraction of query tokens found in description,
-///   with synonym expansion on the query side)
+/// - **0.5 × description overlap** (matches against synonym-expanded query tokens,
+///   normalized by original query size so synonyms can only help, never hurt)
 /// - **0.3 × trigger score** (fraction of query tokens found in the trigger phrase)
 /// - **0.2 × name score** (fraction of query tokens found as substrings of the name)
 ///
@@ -348,16 +351,18 @@ fn compute_query_match(query: &str, name: &str, description: &str) -> (QueryMatc
     // Expand query tokens with synonyms for better recall.
     let expanded_query = expand_synonyms(&query_tokens);
 
-    // Description overlap: fraction of expanded query tokens found in description tokens.
+    // Description overlap: check expanded query tokens against description,
+    // but normalize by original query size so synonyms can only help, never hurt.
+    let query_set: HashSet<&str> = query_tokens.iter().map(|s| s.as_str()).collect();
     let desc_set: HashSet<&str> = desc_tokens.iter().map(|s| s.as_str()).collect();
     let intersection = expanded_query
         .iter()
         .filter(|t| desc_set.contains(t.as_str()))
         .count();
-    let desc_overlap = if expanded_query.is_empty() {
+    let desc_overlap = if query_set.is_empty() {
         0.0
     } else {
-        intersection as f64 / expanded_query.len() as f64
+        intersection as f64 / query_set.len() as f64
     };
 
     // Trigger score: fraction of query tokens found in the trigger phrase.
@@ -475,6 +480,65 @@ mod tests {
         );
     }
 
+    // ── Synonym expansion ─────────────────────────────────────────────
+
+    #[test]
+    fn expand_synonyms_adds_group_members() {
+        let tokens = vec!["valid".to_string()];
+        let expanded = expand_synonyms(&tokens);
+        assert!(expanded.contains("valid"), "original token preserved");
+        assert!(expanded.contains("check"), "synonym 'check' added");
+        assert!(expanded.contains("verifi"), "synonym 'verifi' added");
+        assert!(expanded.contains("lint"), "synonym 'lint' added");
+    }
+
+    #[test]
+    fn expand_synonyms_preserves_unmatched_tokens() {
+        let tokens = vec!["pdf".to_string()];
+        let expanded = expand_synonyms(&tokens);
+        assert_eq!(expanded.len(), 1, "no synonyms for 'pdf'");
+        assert!(expanded.contains("pdf"));
+    }
+
+    #[test]
+    fn expand_synonyms_stems_match_snowball_output() {
+        // Verify that synonym group entries are actual Snowball stems.
+        let cases = [
+            ("validate", "valid"),
+            ("verify", "verifi"),
+            ("check", "check"),
+            ("parse", "pars"),
+            ("install", "instal"),
+            ("discover", "discov"),
+        ];
+        for (word, expected_stem) in &cases {
+            let stemmed = stem(word);
+            assert_eq!(
+                &stemmed, expected_stem,
+                "Snowball stem of '{word}' should be '{expected_stem}', got '{stemmed}'"
+            );
+        }
+    }
+
+    #[test]
+    fn synonym_expansion_does_not_lower_score() {
+        // Exact match: "validate" against description containing "Validates".
+        // Synonyms expand the query but denominator uses original query size,
+        // so synonyms can only help, never hurt.
+        let (_, score_with_synonyms) = compute_query_match(
+            "validate code",
+            "unrelated-name",
+            "Validates source code for correctness.",
+        );
+        // Without synonym expansion, "valid" matches "valid" in desc → 1/2 = 0.5
+        // With synonyms, expanded set may also match "check"/"verifi"/"lint" but
+        // denominator stays 2 → score ≥ 0.5 * 0.5 = 0.25
+        assert!(
+            score_with_synonyms >= 0.25,
+            "synonym expansion should not reduce score below non-expanded baseline, got {score_with_synonyms}"
+        );
+    }
+
     // ── Weighted scoring specific tests ──────────────────────────────
 
     #[test]
@@ -537,9 +601,10 @@ mod tests {
         );
         let result = test_skill(&dir, "process some PDF files").unwrap();
         assert_eq!(result.name, "pdf-tool");
-        assert!(
-            matches!(result.query_match, QueryMatch::Strong | QueryMatch::Weak),
-            "expected Strong or Weak for relevant query, got {:?} (score: {})",
+        assert_eq!(
+            result.query_match,
+            QueryMatch::Strong,
+            "expected Strong for relevant query, got {:?} (score: {})",
             result.query_match,
             result.score,
         );

@@ -17,9 +17,6 @@ use crate::diagnostics::Diagnostic;
 use crate::linter;
 use crate::validator;
 
-/// Maximum points for structural (validation) checks.
-const STRUCTURAL_MAX: u32 = 60;
-
 /// Points per passing structural check.
 const STRUCTURAL_POINTS_PER_CHECK: u32 = 10;
 
@@ -121,9 +118,10 @@ pub fn score(dir: &Path) -> ScoreResult {
     };
 
     let total = structural.score + quality.score;
+    let max = structural.max + quality.max;
     ScoreResult {
         total,
-        max: STRUCTURAL_MAX + QUALITY_MAX,
+        max,
         structural,
         quality,
     }
@@ -196,10 +194,10 @@ fn score_structural(diags: &[Diagnostic]) -> CategoryResult {
         CheckResult {
             label: "No unknown fields".to_string(),
             fail_label: Some("Unknown fields found".to_string()),
-            passed: !diags.iter().any(|d| d.is_warning()),
+            passed: !diags.iter().any(|d| d.code == "W001"),
             message: diags
                 .iter()
-                .find(|d| d.is_warning())
+                .find(|d| d.code == "W001")
                 .map(|d| d.message.clone()),
         },
         CheckResult {
@@ -215,10 +213,11 @@ fn score_structural(diags: &[Diagnostic]) -> CategoryResult {
 
     let passing = checks.iter().filter(|c| c.passed).count() as u32;
     let points = passing * STRUCTURAL_POINTS_PER_CHECK;
+    let max = checks.len() as u32 * STRUCTURAL_POINTS_PER_CHECK;
 
     CategoryResult {
         score: points,
-        max: STRUCTURAL_MAX,
+        max,
         checks,
     }
 }
@@ -367,6 +366,9 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
+    /// Expected structural max (6 checks × 10 points).
+    const STRUCTURAL_MAX: u32 = 6 * STRUCTURAL_POINTS_PER_CHECK;
+
     /// Create a skill directory with given frontmatter content.
     fn make_skill(name: &str, frontmatter: &str) -> (tempfile::TempDir, std::path::PathBuf) {
         let parent = tempdir().unwrap();
@@ -381,6 +383,21 @@ mod tests {
     #[test]
     fn max_score_is_100() {
         assert_eq!(STRUCTURAL_MAX + QUALITY_MAX, 100);
+    }
+
+    #[test]
+    fn perfect_structural_score_matches_expected_max() {
+        // A perfect skill should earn all structural points.
+        let (_parent, dir) = make_skill(
+            "processing-pdfs",
+            "---\nname: processing-pdfs\ndescription: >-\n  Processes PDF files and generates detailed reports.\n  Use when working with documents.\n---\n",
+        );
+        let result = score(&dir);
+        assert_eq!(
+            result.structural.score, STRUCTURAL_MAX,
+            "perfect skill structural score should equal max"
+        );
+        assert_eq!(result.structural.max, STRUCTURAL_MAX);
     }
 
     #[test]
