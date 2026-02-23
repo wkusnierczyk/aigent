@@ -78,6 +78,7 @@ impl From<PromptOutputFormat> for aigent::prompt::PromptFormat {
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]
 enum Commands {
     /// Validate skill directories (spec conformance)
     Validate {
@@ -251,8 +252,8 @@ enum Commands {
         format: Format,
     },
     /// Format SKILL.md files (canonical key order, clean whitespace)
-    #[command(alias = "format")]
-    Fmt {
+    #[command(alias = "fmt")]
+    Format {
         /// Paths to skill directories or SKILL.md files [default: .]
         #[arg(default_value = ".")]
         skill_dirs: Vec<PathBuf>,
@@ -997,7 +998,7 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Fmt {
+        Some(Commands::Format {
             skill_dirs,
             check,
             recursive,
@@ -1010,7 +1011,7 @@ fn main() {
                 if recursive {
                     eprintln!("No SKILL.md files found under the specified path(s).");
                 } else {
-                    eprintln!("Usage: aigent fmt <skill-dir> [<skill-dir>...]");
+                    eprintln!("Usage: aigent format <skill-dir> [<skill-dir>...]");
                 }
                 std::process::exit(1);
             }
@@ -1030,7 +1031,7 @@ fn main() {
                                 let path = aigent::find_skill_md(dir).unwrap();
                                 std::fs::write(&path, &result.content).unwrap_or_else(|e| {
                                     eprintln!(
-                                        "aigent fmt: failed to write {}: {e}",
+                                        "aigent format: failed to write {}: {e}",
                                         path.display()
                                     );
                                     std::process::exit(1);
@@ -1040,7 +1041,7 @@ fn main() {
                         }
                     }
                     Err(e) => {
-                        eprintln!("aigent fmt: {}: {e}", dir.display());
+                        eprintln!("aigent format: {}: {e}", dir.display());
                         any_error = true;
                     }
                 }
