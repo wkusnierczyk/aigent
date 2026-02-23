@@ -206,7 +206,10 @@ fn run_upgrade(
 
     // U002: Check for missing trigger phrase in description.
     let desc_lower = props.description.to_lowercase();
-    if !desc_lower.contains("use when") && !desc_lower.contains("use this when") {
+    let has_trigger = aigent::linter::TRIGGER_PHRASES
+        .iter()
+        .any(|p| desc_lower.contains(p));
+    if !has_trigger {
         suggestions.push(Suggestion {
             code: U002,
             kind: SuggestionKind::Info,

@@ -2,6 +2,9 @@
 
 ## [0.6.10] — 2026-02-23
 
+- Improve probe/score semantics: Snowball stemmer, synonym expansion, graduated scoring, proportional structural scoring, shared trigger phrases (#168)
+- **Breaking:** Probe scores change due to improved stemmer, synonym expansion, and graduated trigger/name scoring
+- **Breaking:** Score totals change due to proportional structural scoring (10 per check instead of all-or-nothing 60)
 - Add integration tests against anthropics/skills repo (#167)
 
 ## [0.6.9] — 2026-02-23

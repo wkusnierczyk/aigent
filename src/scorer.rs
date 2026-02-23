@@ -20,6 +20,9 @@ use crate::validator;
 /// Maximum points for structural (validation) checks.
 const STRUCTURAL_MAX: u32 = 60;
 
+/// Points per passing structural check.
+const STRUCTURAL_POINTS_PER_CHECK: u32 = 10;
+
 /// Points per passing lint check.
 const LINT_POINTS_PER_CHECK: u32 = 8;
 
@@ -128,12 +131,9 @@ pub fn score(dir: &Path) -> ScoreResult {
 
 /// Score the structural (validation) category.
 ///
-/// Full 60 points if no errors; 0 if any error or warning present.
+/// Each of the 6 checks independently earns 10 points (60 max).
 /// Individual checks are derived from validation diagnostic codes.
 fn score_structural(diags: &[Diagnostic]) -> CategoryResult {
-    let has_errors = diags.iter().any(|d| d.is_error());
-    let has_warnings = diags.iter().any(|d| d.is_warning());
-
     let checks = vec![
         CheckResult {
             label: "SKILL.md exists and is parseable".to_string(),
@@ -196,7 +196,7 @@ fn score_structural(diags: &[Diagnostic]) -> CategoryResult {
         CheckResult {
             label: "No unknown fields".to_string(),
             fail_label: Some("Unknown fields found".to_string()),
-            passed: !has_warnings,
+            passed: !diags.iter().any(|d| d.is_warning()),
             message: diags
                 .iter()
                 .find(|d| d.is_warning())
@@ -213,11 +213,8 @@ fn score_structural(diags: &[Diagnostic]) -> CategoryResult {
         },
     ];
 
-    let points = if has_errors || has_warnings {
-        0
-    } else {
-        STRUCTURAL_MAX
-    };
+    let passing = checks.iter().filter(|c| c.passed).count() as u32;
+    let points = passing * STRUCTURAL_POINTS_PER_CHECK;
 
     CategoryResult {
         score: points,
@@ -440,45 +437,50 @@ mod tests {
     // ── Structural errors ────────────────────────────────────────────
 
     #[test]
-    fn structural_errors_score_at_most_quality_max() {
-        // Missing SKILL.md entirely → structural = 0, quality = 0
+    fn structural_error_reduces_structural_score() {
+        // Missing SKILL.md entirely → E000 fails (−10), other 5 checks pass = 50
         let parent = tempdir().unwrap();
         let result = score(parent.path());
         assert_eq!(
-            result.structural.score, 0,
-            "missing SKILL.md should score structural 0"
-        );
-        assert!(
-            result.total <= QUALITY_MAX,
-            "structural errors should cap total to at most quality max ({}), got {}",
-            QUALITY_MAX,
-            result.total,
+            result.structural.score, 50,
+            "missing SKILL.md should lose only 10 structural points, got {}",
+            result.structural.score,
         );
     }
 
     #[test]
-    fn structural_error_sets_structural_to_zero() {
-        // Empty name causes E001
+    fn structural_error_proportional_scoring() {
+        // Empty name causes E001 → "Name format valid" fails (−10)
         let (_parent, dir) = make_skill(
             "bad-skill",
             "---\nname: \"\"\ndescription: A valid description for scoring tests here\n---\n",
         );
         let result = score(&dir);
-        assert_eq!(
-            result.structural.score, 0,
-            "validation errors should zero structural score"
+        assert!(
+            result.structural.score > 0 && result.structural.score < STRUCTURAL_MAX,
+            "validation error should reduce but not zero structural score, got {}",
+            result.structural.score,
         );
     }
 
     // ── Unparseable skill ────────────────────────────────────────────
 
     #[test]
-    fn unparseable_skill_scores_zero() {
+    fn unparseable_skill_scores_partial_structural() {
+        // Unparseable → E000 fails, but other structural checks pass.
+        // Quality = 0 (can't parse).
         let (_parent, dir) = make_skill("broken", "this is not valid frontmatter");
         let result = score(&dir);
-        assert_eq!(result.total, 0, "unparseable skill should score 0");
-        assert_eq!(result.structural.score, 0);
         assert_eq!(result.quality.score, 0);
+        assert!(
+            result.structural.score > 0,
+            "unparseable skill should still earn partial structural points, got {}",
+            result.structural.score,
+        );
+        assert!(
+            result.structural.score < STRUCTURAL_MAX,
+            "unparseable skill should not earn full structural points"
+        );
     }
 
     // ── Check details ────────────────────────────────────────────────
