@@ -1,33 +1,103 @@
 use std::path::PathBuf;
 
-pub(crate) fn run(skill_dir: PathBuf, apply: bool, full: bool, format: super::Format) {
+// Upgrade rule IDs (local to upgrade — these are not Diagnostic instances).
+const U001: &str = "U001";
+const U002: &str = "U002";
+const U003: &str = "U003";
+
+/// Whether a suggestion is auto-applied by `--apply` or informational only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SuggestionKind {
+    /// Auto-applied with `--apply`.
+    Fix,
+    /// Informational only — `--apply` does not act on this.
+    Info,
+}
+
+/// A single upgrade suggestion with a stable rule ID.
+struct Suggestion {
+    code: &'static str,
+    kind: SuggestionKind,
+    message: String,
+}
+
+impl std::fmt::Display for Suggestion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let tag = match self.kind {
+            SuggestionKind::Fix => "fix",
+            SuggestionKind::Info => "info",
+        };
+        write!(f, "[{tag}] {}: {}", self.code, self.message)
+    }
+}
+
+pub(crate) fn run(
+    skill_dir: PathBuf,
+    apply: bool,
+    dry_run: bool,
+    full: bool,
+    format: super::Format,
+) {
+    // --dry-run is a no-op (default is already dry-run). It exists for script
+    // readability. Clap's conflicts_with prevents --dry-run --apply.
+    let _ = dry_run;
+
     let dir = super::resolve_skill_dir(&skill_dir);
     match run_upgrade(&dir, apply, full) {
-        Ok(suggestions) => {
-            if suggestions.is_empty() {
+        Ok((suggestions, full_messages)) => {
+            if suggestions.is_empty() && full_messages.is_empty() {
                 eprintln!("No upgrade suggestions — skill follows current best practices.");
             } else {
                 match format {
                     super::Format::Text => {
+                        for msg in &full_messages {
+                            eprintln!("{msg}");
+                        }
                         for s in &suggestions {
                             eprintln!("{s}");
                         }
-                        if !apply {
+                        let fix_count = suggestions
+                            .iter()
+                            .filter(|s| s.kind == SuggestionKind::Fix)
+                            .count();
+                        let info_count = suggestions
+                            .iter()
+                            .filter(|s| s.kind == SuggestionKind::Info)
+                            .count();
+                        if !apply && fix_count > 0 {
+                            eprint!("\nRun with --apply to apply {fix_count} fix(es).");
+                            if info_count > 0 {
+                                eprint!(" {info_count} informational suggestion(s) shown above.");
+                            }
+                            eprintln!();
+                        } else if !apply && info_count > 0 {
                             eprintln!(
-                                "\nRun with --apply to apply {} suggestion(s).",
-                                suggestions.len()
+                                "\n{info_count} informational suggestion(s) — no auto-fixes available."
                             );
                         }
                     }
                     super::Format::Json => {
+                        let json_suggestions: Vec<serde_json::Value> = suggestions
+                            .iter()
+                            .map(|s| {
+                                serde_json::json!({
+                                    "code": s.code,
+                                    "kind": match s.kind {
+                                        SuggestionKind::Fix => "fix",
+                                        SuggestionKind::Info => "info",
+                                    },
+                                    "message": s.message,
+                                })
+                            })
+                            .collect();
                         let json = serde_json::json!({
-                            "suggestions": suggestions,
+                            "suggestions": json_suggestions,
                             "applied": apply,
                         });
                         println!("{}", serde_json::to_string_pretty(&json).unwrap());
                     }
                 }
-                if !apply {
+                if !apply && suggestions.iter().any(|s| s.kind == SuggestionKind::Fix) {
                     std::process::exit(1);
                 }
             }
@@ -53,16 +123,23 @@ fn extract_frontmatter_lines(content: &str) -> Vec<String> {
 
 /// Run upgrade analysis on a skill directory.
 ///
-/// Checks for missing best-practice fields and returns a list of human-readable
-/// suggestions. With `apply = true`, attempts to add missing optional fields.
+/// Checks for missing best-practice fields and returns structured suggestions.
+/// With `apply = true`, attempts to add missing optional fields (fix-kind only).
 /// With `full = true`, also runs validate + lint first (and applies fixes if
 /// `apply` is also true).
+///
+/// # Invariant
+///
+/// Upgrade rules MUST NOT modify the markdown body. Body-modifying
+/// transformations belong in `format` (style) or require explicit user
+/// confirmation beyond `--apply`.
 fn run_upgrade(
     dir: &std::path::Path,
     apply: bool,
     full: bool,
-) -> std::result::Result<Vec<String>, aigent::AigentError> {
+) -> std::result::Result<(Vec<Suggestion>, Vec<String>), aigent::AigentError> {
     let mut suggestions = Vec::new();
+    let mut full_messages = Vec::new();
 
     // Full mode: run validate + lint before upgrade analysis.
     if full {
@@ -81,7 +158,7 @@ fn run_upgrade(
             if !fixable.is_empty() {
                 let fix_count = aigent::apply_fixes(dir, &fixable)?;
                 if fix_count > 0 {
-                    suggestions.push(format!(
+                    full_messages.push(format!(
                         "[full] Applied {fix_count} validation/lint fix(es)"
                     ));
                 }
@@ -98,50 +175,60 @@ fn run_upgrade(
         let warnings: Vec<_> = diags.iter().filter(|d| d.is_warning()).collect();
         if !errors.is_empty() || !warnings.is_empty() {
             for d in &errors {
-                suggestions.push(format!("[full] error: {d}"));
+                full_messages.push(format!("[full] error: {d}"));
             }
             for d in &warnings {
-                suggestions.push(format!("[full] warning: {d}"));
+                full_messages.push(format!("[full] warning: {d}"));
             }
         }
     }
 
     let props = aigent::read_properties(dir)?;
 
-    // Check for missing compatibility field.
+    // U001: Check for missing compatibility field.
     if props.compatibility.is_none() {
-        suggestions.push(
-            "Missing 'compatibility' field — recommended for multi-platform skills.".to_string(),
-        );
+        suggestions.push(Suggestion {
+            code: U001,
+            kind: SuggestionKind::Fix,
+            message: "Missing 'compatibility' field — recommended for multi-platform skills."
+                .to_string(),
+        });
     }
 
-    // Check for missing trigger phrase in description.
+    // U002: Check for missing trigger phrase in description.
     let desc_lower = props.description.to_lowercase();
     if !desc_lower.contains("use when") && !desc_lower.contains("use this when") {
-        suggestions.push(
-            "Description lacks 'Use when...' trigger phrase — helps Claude activate the skill."
-                .to_string(),
-        );
+        suggestions.push(Suggestion {
+            code: U002,
+            kind: SuggestionKind::Info,
+            message:
+                "Description lacks 'Use when...' trigger phrase — helps Claude activate the skill."
+                    .to_string(),
+        });
     }
 
-    // Check body length.
+    // U003: Check body length.
     let body = aigent::read_body(dir)?;
     let line_count = body.lines().count();
     if line_count > 500 {
-        suggestions.push(format!(
-            "Body is {line_count} lines — consider splitting into reference files (recommended < 500)."
-        ));
+        suggestions.push(Suggestion {
+            code: U003,
+            kind: SuggestionKind::Info,
+            message: format!(
+                "Body is {line_count} lines — consider splitting into reference files (recommended < 500)."
+            ),
+        });
     }
 
-    // Apply upgrades if requested.
-    if apply && !suggestions.is_empty() {
+    // Apply upgrades if requested (fix-kind suggestions only).
+    if apply && suggestions.iter().any(|s| s.kind == SuggestionKind::Fix) {
         if let Some(path) = aigent::find_skill_md(dir) {
             if let Ok(content) = std::fs::read_to_string(&path) {
                 if let Ok((raw_map, body)) = aigent::parse_frontmatter(&content) {
                     let front_lines = extract_frontmatter_lines(&content);
                     let mut updated_lines = front_lines.clone();
 
-                    // Append compatibility if missing.
+                    // U001: Append compatibility if missing.
                     if props.compatibility.is_none() && !raw_map.contains_key("compatibility") {
                         updated_lines.push("compatibility: claude-code".to_string());
                     }
@@ -157,5 +244,5 @@ fn run_upgrade(
         }
     }
 
-    Ok(suggestions)
+    Ok((suggestions, full_messages))
 }

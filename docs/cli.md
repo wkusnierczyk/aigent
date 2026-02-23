@@ -95,7 +95,7 @@ what "success" means for each command.
 | `properties` | Properties printed | Parse error |
 | `score` | Perfect score (100/100) | Score below 100 |
 | `test` | All test cases pass | Any test case fails |
-| `upgrade` | No suggestions, or applied successfully | Unapplied suggestions remain, or error |
+| `upgrade` | No suggestions, or all fixes applied | Unapplied fix suggestions remain, or error |
 | `validate` | No errors | Errors found (warnings do not affect exit code) |
 | `validate-plugin` | No errors | Errors found in manifest, hooks, agents, commands, skills, or cross-component checks |
 
@@ -171,14 +171,34 @@ Run fixture-based test suites from `tests.yml`.
 
 ### `upgrade` flags
 
-Check a skill for upgrade opportunities.
+Check a skill for upgrade opportunities. Suggestions are tagged `[fix]`
+(auto-applied with `--apply`) or `[info]` (informational only).
 
 <table>
 <tr><th width="280">Flag</th><th>Description</th></tr>
-<tr><td><code>--apply</code></td><td>Apply automatic upgrades</td></tr>
+<tr><td><code>--apply</code></td><td>Apply automatic upgrades (<code>[fix]</code> suggestions only)</td></tr>
+<tr><td><code>--dry-run</code></td><td>Preview suggestions without modifying files (default behavior; cannot be combined with <code>--apply</code>)</td></tr>
 <tr><td><code>--format &lt;format&gt;</code></td><td>Output format: <code>text</code> or <code>json</code></td></tr>
 <tr><td><code>--full</code></td><td>Run validate + lint before upgrade (with <code>--apply</code>, also fix errors first)</td></tr>
 </table>
+
+**Scope and boundaries:**
+
+- Appends missing optional fields to frontmatter; never removes or rewrites existing fields
+- Never modifies the markdown body
+- Never changes field values that already exist
+- All suggestions are spec-compliant (no non-spec fields)
+
+**Upgrade rules:**
+
+| Code | Description | Kind | Modifies |
+|------|-------------|------|----------|
+| U001 | Missing `compatibility` field | fix | Appends `compatibility: claude-code` to frontmatter |
+| U002 | Missing "Use when..." trigger phrase | info | Nothing (advisory) |
+| U003 | Body exceeds 500 lines | info | Nothing (advisory) |
+
+`--apply` only acts on `fix`-kind rules. Informational suggestions are always
+advisory — they appear in output but are never auto-applied.
 
 ### `validate` flags
 
@@ -580,20 +600,27 @@ $ aigent test my-skill/
 
 ### `upgrade` — Detect and apply best-practice improvements
 
-Checks for recommended-but-optional fields and patterns. Use `--apply` to
-write missing fields into the `SKILL.md`. The `--full` flag first runs
-validate + lint and optionally fixes errors before analysing upgrades.
+Checks for recommended-but-optional fields and patterns. Suggestions are
+tagged `[fix]` (auto-applied with `--apply`) or `[info]` (informational only).
 
 ```
 $ aigent upgrade skills/aigent-validator
-Missing 'compatibility' field — recommended for multi-platform skills.
+[fix] U001: Missing 'compatibility' field — recommended for multi-platform skills.
+[info] U002: Description lacks 'Use when...' trigger phrase — helps Claude activate the skill.
 
-Run with --apply to apply 1 suggestion(s).
+Run with --apply to apply 1 fix(es). 1 informational suggestion(s) shown above.
 ```
 
 ```
 $ aigent upgrade --apply skills/aigent-validator
-(applies missing fields in-place, prints confirmation to stderr)
+(applies fix-kind suggestions in-place, prints confirmation to stderr)
+```
+
+Use `--dry-run` for explicit no-modify intent in scripts (equivalent to
+omitting `--apply`):
+
+```
+$ aigent upgrade --dry-run skills/aigent-validator
 ```
 
 Full mode runs validate + lint first, and with `--apply` fixes errors
@@ -602,7 +629,7 @@ before performing upgrades:
 ```
 $ aigent upgrade --full --apply skills/aigent-validator
 [full] Applied 1 validation/lint fix(es)
-Missing 'compatibility' field — recommended for multi-platform skills.
+[fix] U001: Missing 'compatibility' field — recommended for multi-platform skills.
 ```
 
 ### `validate` — Check skill directories for specification conformance

@@ -1,5 +1,10 @@
 # Changes
 
+## [Unreleased]
+
+- Clarify upgrade scope: `[fix]`/`[info]` tags, rule IDs (U001–U003), `--dry-run` flag, docs (#163)
+- **Breaking:** `upgrade --format json` now emits structured suggestion objects (`code`, `kind`, `message`) instead of bare strings
+
 ## [0.6.8] — 2026-02-23
 
 - Automate Homebrew formula updates on release (#162)
