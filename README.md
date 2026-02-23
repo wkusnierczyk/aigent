@@ -1423,6 +1423,14 @@ Once the `v*` tag is pushed, the release workflow runs:
 | Release | Create GitHub Release with changelog and binary assets |
 | Publish | Publish to [crates.io](https://crates.io/crates/aigent) |
 
+## See also
+
+| Tool | Focus |
+|------|-------|
+| [agent-skills](https://crates.io/crates/agent-skills) | Parse and validate agent skills (Rust library) |
+| [skills](https://github.com/cortesi/skills) | Sync skills across Claude Code and Codex (Rust CLI) |
+| [oh-my-agent-skills](https://crates.io/crates/oh-my-agent-skills) | Terminal-based skill manager (TUI) |
+
 ## References
 
 | Reference | Description |
