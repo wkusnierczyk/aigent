@@ -1434,7 +1434,7 @@ Once the `v*` tag is pushed, the release workflow runs:
 
 ```
 aigent: Rust AI Agent Skills Tool
-├─ version:    0.6.2
+├─ version:    0.6.3
 ├─ author:     Wacław Kuśnierczyk
 ├─ developer:  mailto:waclaw.kusnierczyk@gmail.com
 ├─ source:     https://github.com/wkusnierczyk/aigent

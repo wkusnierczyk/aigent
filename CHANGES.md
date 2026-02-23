@@ -1,5 +1,9 @@
 # Changes
 
+## [0.6.3] — 2026-02-23
+
+- Improve --help output: sort commands, show 'format' as primary name (#150)
+
 ## [0.6.2] — 2026-02-23
 
 - Fix upgrade --apply adding non-spec fields that regress score (#146)
