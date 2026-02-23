@@ -1431,10 +1431,8 @@ Once the `v*` tag is pushed, the release workflow runs:
 | [Agent Skills organisation](https://github.com/agentskills) | Umbrella for agent skills tooling |
 | [agentskills/agentskills](https://github.com/agentskills/agentskills) | Python reference implementation |
 | [anthropics/skills](https://github.com/anthropics/skills) | Anthropic's skills repository |
-| [docs.rs/aigent](https://docs.rs/aigent) | Rust API documentation |
-| [crates.io/crates/aigent](https://crates.io/crates/aigent) | Package registry |
 
-## About and licence
+## About
 
 ```
 aigent: Rust AI Agent Skills Tool
@@ -1446,3 +1444,11 @@ aigent: Rust AI Agent Skills Tool
 ```
 
 [Apache 2.0](LICENSE) — see [apache.org/licenses/LICENSE-2.0](https://www.apache.org/licenses/LICENSE-2.0).
+
+| Reference | Description |
+|-----------|-------------|
+| [Sources](https://github.com/wkusnierczyk/aigent) | GitHub repository |
+| [Releases](https://github.com/wkusnierczyk/aigent/releases) | Binary releases |
+| [Crates](https://crates.io/crates/aigent) | Package registry |
+| [Documentation](https://docs.rs/aigent) | Rust API documentation |
+| [Blog post](https://dev.to/wkusnierczyk/aigent-toolchain-for-ai-agent-skills-3hib) | Introduction and motivation (`dev.to`) |
