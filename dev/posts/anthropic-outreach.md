@@ -1,27 +1,27 @@
 # Anthropic outreach
 
-## Email to devrel@anthropic.com
+## ~~Email to devrel@anthropic.com~~ (address not found)
 
-Subject: `aigent` — open-source toolchain for the Agent Skills specification
+Subject: aigent — open-source toolchain for the Agent Skills specification
 
 Hi,
 
-I'd like to introduce `aigent`, an open-source toolchain built to be fully compliant with the Anthropic agent skill specification. It's designed to complement Anthropic's own tooling: `plugin-dev` teaches the patterns, `aigent` enforces them deterministically.
+I'd like to introduce aigent, an open-source toolchain built to be fully compliant with the Anthropic agent skill specification. It's designed to complement Anthropic's own tooling: plugin-dev teaches the patterns, aigent enforces them deterministically.
 
-`aigent` implements every validation rule from the specification, reconciles cases where the specification and the Python reference implementation diverge, and adds checks that go beyond both (Unicode NFKC normalization, symlink safety, path traversal guards, post-build validation). It provides deterministic validation, formatting, scoring, testing, and plugin assembly for `SKILL.md` files — the kind of infrastructure that lets teams enforce skill quality in CI, pre-commit hooks, and build pipelines.
+aigent implements every validation rule from the specification, reconciles cases where the specification and the Python reference implementation diverge, and adds checks that go beyond both (Unicode NFKC normalization, symlink safety, path traversal guards, post-build validation). It provides deterministic validation, formatting, scoring, testing, and plugin assembly for SKILL.md files — the kind of infrastructure that lets teams enforce skill quality in CI, pre-commit hooks, and build pipelines.
 
-Beyond individual skills, `aigent` validates entire Claude Code plugin directories — manifest, hooks, agents, commands, skills, and cross-component consistency — with typed diagnostics and error codes.
+Beyond individual skills, aigent validates entire Claude Code plugin directories — manifest, hooks, agents, commands, skills, and cross-component consistency — with typed diagnostics and error codes.
 
 It ships as a native CLI (Homebrew, crates.io, pre-built binaries for Linux/macOS/Windows), a Rust library, and a Claude Code plugin with three hybrid skills that work with or without the CLI installed.
 
-The project was developed with rigorous engineering discipline — milestone-driven planning, structured code reviews, and comprehensive test coverage (500+ tests across unit, integration, and plugin levels). Claude was used extensively at every stage of the development cycle: architecture, implementation, review, and documentation. `aigent` is itself a product of the Claude ecosystem.
+The project was developed with rigorous engineering discipline — milestone-driven planning, structured code reviews, and comprehensive test coverage (500+ tests across unit, integration, and plugin levels). Claude was used extensively at every stage of the development cycle: architecture, implementation, review, and documentation. aigent is itself a product of the Claude ecosystem.
 
-Demo: https://github.com/wkusnierczyk/aigent#readme (GIF in the README)  
-Blog post: https://dev.to/wkusnierczyk/aigent-toolchain-for-ai-agent-skills-3hib  
-Repository: https://github.com/wkusnierczyk/aigent  
+Demo: https://github.com/wkusnierczyk/aigent#readme (GIF in the README)
+Blog post: https://dev.to/wkusnierczyk/aigent-toolchain-for-ai-agent-skills-3hib
+Repository: https://github.com/wkusnierczyk/aigent
 Crate: https://crates.io/crates/aigent
 
-While feature-rich, `aigent` is still an early-stage project and I'd welcome any feedback on the functionality, usefullness, implementation of the tool. Happy to discuss integration opportunities — for example, listing in a future plugin directory.
+While feature-rich, aigent is still an early-stage project and I'd welcome any feedback on the functionality, usefulness, implementation of the tool. Happy to discuss integration opportunities — for example, listing in a future plugin directory.
 
 Best,
 Wacław Kuśnierczyk
