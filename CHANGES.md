@@ -1,5 +1,9 @@
 # Changes
 
+## [0.6.6] — 2026-02-23
+
+- Modularize main.rs into src/cli/ modules (#159)
+
 ## [0.6.5] — 2026-02-23
 
 - Remove dev/ from repo, move plugin-dev.md to docs/ (#157)
