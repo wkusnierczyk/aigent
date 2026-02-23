@@ -1011,7 +1011,7 @@ fn main() {
                 if recursive {
                     eprintln!("No SKILL.md files found under the specified path(s).");
                 } else {
-                    eprintln!("Usage: aigent fmt <skill-dir> [<skill-dir>...]");
+                    eprintln!("Usage: aigent format <skill-dir> [<skill-dir>...]");
                 }
                 std::process::exit(1);
             }
@@ -1031,7 +1031,7 @@ fn main() {
                                 let path = aigent::find_skill_md(dir).unwrap();
                                 std::fs::write(&path, &result.content).unwrap_or_else(|e| {
                                     eprintln!(
-                                        "aigent fmt: failed to write {}: {e}",
+                                        "aigent format: failed to write {}: {e}",
                                         path.display()
                                     );
                                     std::process::exit(1);
@@ -1041,7 +1041,7 @@ fn main() {
                         }
                     }
                     Err(e) => {
-                        eprintln!("aigent fmt: {}: {e}", dir.display());
+                        eprintln!("aigent format: {}: {e}", dir.display());
                         any_error = true;
                     }
                 }
