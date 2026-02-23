@@ -39,6 +39,7 @@ cargo install cargo-edit            # Adds `cargo set-version` for release versi
 cargo build                         # Build (debug)
 cargo build --release               # Build (release)
 cargo test                          # Run all tests
+cargo test --test anthropics_skills -- --ignored  # Run integration tests (anthropics/skills)
 cargo clippy -- -D warnings         # Lint (warnings as errors)
 cargo fmt                           # Format code
 cargo fmt --check                   # Check formatting
@@ -140,7 +141,13 @@ Every pull request runs the CI pipeline on three OSes
 | Formatting | `cargo fmt --check` |
 | Linting | `cargo clippy -- -D warnings` |
 | Testing | `cargo test` |
+| Integration tests | `cargo test --test anthropics_skills -- --ignored` |
 | Release build | `cargo build --release` |
+
+Integration tests validate aigent against the full
+[Anthropic skill collection](https://github.com/anthropics/skills)
+(16 skills, pinned snapshot in `tests/fixtures/anthropics-skills/`).
+They are gated with `#[ignore]` and do not run in default `cargo test`.
 
 ### Release workflow
 

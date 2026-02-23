@@ -1,0 +1,10 @@
+Snapshot of https://github.com/anthropics/skills at commit 1ed29a0.
+
+Only Apache 2.0-licensed skills are included (12 of 16).
+Source-available skills (docx, pdf, pptx, xlsx) are excluded — their license prohibits redistribution.
+
+Non-.md files that aigent does not read (scripts, Python, JS, HTML) are stripped.
+LICENSE.txt files are preserved per Apache 2.0 Section 4.
+
+To update: clone the repo at a new commit, copy the Apache 2.0-licensed skills and template,
+strip non-.md files (except LICENSE.txt), verify with: cargo test --test anthropics_skills -- --ignored
