@@ -7,9 +7,9 @@
 - [ ] #3 Eliminate `unwrap()` in library code — replace with proper error propagation
 - [ ] #4 Clean up `dev/` directory — remove or relocate milestone transcripts
 - [x] #5 Fix license metadata — already shows Apache 2.0
-- [ ] #6 Add competitive differentiation — "Why `aigent`?" section in README
+- [x] #6 Add competitive differentiation — "Why `aigent`?" section in README
 - [ ] #7 Address sparse commit history — consider unsquashed merges or contributor guide
-- [ ] #8 Split README — move reference material to `docs/`
+- [x] #8 Split README — move reference material to `docs/`
 - [ ] #9 Improve `probe`/`score` semantics — document limitations or add semantic matching
 - [ ] #10 Add real-world integration tests — test against `anthropics/skills` repo
 - [ ] #11 Clarify `upgrade` scope — document opinionated behavior, tighten boundaries
