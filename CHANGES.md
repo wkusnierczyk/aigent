@@ -1,5 +1,9 @@
 # Changes
 
+## [0.6.7] — 2026-02-23
+
+- Clarify expect() policy for static regex initializers (#161)
+
 ## [0.6.6] — 2026-02-23
 
 - Modularize main.rs into src/cli/ modules (#159)
