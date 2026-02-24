@@ -247,7 +247,7 @@ pub fn validate_manifest(path: &Path) -> Vec<Diagnostic> {
         if contains_path_traversal(value) {
             diags.push(
                 Diagnostic::new(
-                    Severity::Warning,
+                    Severity::Error,
                     P011,
                     format!("`{field}` contains path traversal: \"{value}\""),
                 )

@@ -3,7 +3,8 @@
 ## [0.7.0] — 2026-02-23
 
 - Improve probe/score semantics (#171)
-- [SEC-4] Reject path traversal (`..`) in plugin.json path overrides (P011) (#151)
+- [SEC-4] Reject path traversal (`..`) in plugin.json path overrides (P011, Error) (#151)
+- P006 (absolute path) now short-circuits, no longer also emitting P007
 - [SEC-5] Enforce 1 MiB file size limit in all plugin validators (#152)
 - [SEC-6] Re-check file type before write-back in fixer and formatter (#153)
 - Fix non-portable `\n` in sed replacement in `version.sh`
