@@ -399,7 +399,7 @@ See [docs/development.md](docs/development.md).
 
 ```
 aigent: Rust AI Agent Skills Tool
-├─ version:    0.7.0
+├─ version:    0.7.1
 ├─ author:     Wacław Kuśnierczyk
 ├─ developer:  mailto:waclaw.kusnierczyk@gmail.com
 ├─ source:     https://github.com/wkusnierczyk/aigent

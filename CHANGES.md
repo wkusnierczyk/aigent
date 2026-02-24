@@ -1,5 +1,9 @@
 # Changes
 
+## [0.7.1] — 2026-02-24
+
+- M14 finalization: SEC-4, SEC-5, SEC-6, version.sh fix (#172)
+
 ## [0.7.0] — 2026-02-23
 
 - Improve probe/score semantics (#171)
