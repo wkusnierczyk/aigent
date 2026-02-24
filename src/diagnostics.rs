@@ -207,6 +207,8 @@ pub const P008: &str = "P008";
 pub const P009: &str = "P009";
 /// Missing recommended field (author, homepage, license).
 pub const P010: &str = "P010";
+/// Path traversal (`..`) in plugin path override.
+pub const P011: &str = "P011";
 
 // ── Hook validation codes (H001–H011) ──────────────────────────────────
 
@@ -410,10 +412,10 @@ mod tests {
         let codes = [
             E000, E001, E002, E003, E004, E005, E006, E007, E008, E009, E010, E011, E012, E013,
             E014, E015, E016, E017, E018, W001, W002, S001, S002, S003, S004, S005, S006, C001,
-            C002, C003, P001, P002, P003, P004, P005, P006, P007, P008, P009, P010, H001, H002,
-            H003, H004, H005, H006, H007, H008, H009, H010, H011, A001, A002, A003, A004, A005,
-            A006, A007, A008, A009, A010, K001, K002, K003, K004, K005, K006, K007, X001, X002,
-            X003, X004, X005, X006,
+            C002, C003, P001, P002, P003, P004, P005, P006, P007, P008, P009, P010, P011, H001,
+            H002, H003, H004, H005, H006, H007, H008, H009, H010, H011, A001, A002, A003, A004,
+            A005, A006, A007, A008, A009, A010, K001, K002, K003, K004, K005, K006, K007, X001,
+            X002, X003, X004, X005, X006,
         ];
         let mut seen = std::collections::HashSet::new();
         for code in &codes {

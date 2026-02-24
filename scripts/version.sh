@@ -138,10 +138,14 @@ cmd_set() {
         if ! grep -Fq "## [$VERSION]" "$CHANGES"; then
             local TODAY
             TODAY="$(date +%Y-%m-%d)"
-            local STUB
-            STUB="## [$VERSION] — $TODAY\n\n_No changes yet._\n"
-            # Insert after the "# Changes" header line
-            sedi "s/^# Changes$/# Changes\n\n$STUB/" "$CHANGES"
+            local TMPFILE
+            TMPFILE="$(mktemp)"
+            local HEADER="## [$VERSION] — $TODAY"
+            awk -v header="$HEADER" '
+                /^# Changes$/ { print; print ""; print header; print ""; print "_No changes yet._"; print ""; next }
+                { print }
+            ' "$CHANGES" > "$TMPFILE"
+            mv "$TMPFILE" "$CHANGES"
             echo "Added CHANGES.md stub for $VERSION"
             CHANGED=1
         else

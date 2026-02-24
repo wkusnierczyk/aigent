@@ -84,6 +84,13 @@ pub fn apply_fixes(dir: &Path, diagnostics: &[Diagnostic]) -> Result<usize> {
     }
 
     if fix_count > 0 && modified != content {
+        // Re-check that the target is still a regular file to reduce the TOCTOU
+        // window between initial read and write-back.
+        if !crate::fs_util::is_regular_file(&path) {
+            return Err(crate::errors::AigentError::Io(std::io::Error::other(
+                format!("target is no longer a regular file: {}", path.display()),
+            )));
+        }
         std::fs::write(&path, &modified)?;
     }
 

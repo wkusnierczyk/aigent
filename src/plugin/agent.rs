@@ -33,7 +33,7 @@ const GENERIC_NAMES: &[&str] = &["helper", "assistant", "agent", "tool"];
 pub fn validate_agent(path: &Path) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
 
-    let content = match std::fs::read_to_string(path) {
+    let content = match crate::parser::read_file_checked(path) {
         Ok(c) => c,
         Err(e) => {
             diags.push(Diagnostic::new(

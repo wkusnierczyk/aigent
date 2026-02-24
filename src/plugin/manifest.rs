@@ -7,7 +7,7 @@ use regex::Regex;
 use serde::Deserialize;
 
 use crate::diagnostics::{
-    Diagnostic, Severity, P001, P002, P003, P004, P005, P006, P007, P008, P009, P010,
+    Diagnostic, Severity, P001, P002, P003, P004, P005, P006, P007, P008, P009, P010, P011,
 };
 
 /// Regex for valid kebab-case names: lowercase letters, digits, hyphens.
@@ -108,6 +108,13 @@ impl PluginManifest {
     }
 }
 
+/// Returns `true` if the path contains `..` (parent directory) components.
+fn contains_path_traversal(path_str: &str) -> bool {
+    Path::new(path_str)
+        .components()
+        .any(|c| c == std::path::Component::ParentDir)
+}
+
 /// Validate a `plugin.json` file at the given path.
 ///
 /// Returns a list of diagnostics (errors, warnings, info). Never panics or
@@ -117,7 +124,7 @@ pub fn validate_manifest(path: &Path) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
 
     // Read file
-    let content = match std::fs::read_to_string(path) {
+    let content = match crate::parser::read_file_checked(path) {
         Ok(c) => c,
         Err(e) => {
             diags.push(Diagnostic::new(
@@ -219,7 +226,7 @@ pub fn validate_manifest(path: &Path) -> Vec<Diagnostic> {
         Some(_) => {}
     }
 
-    // P006/P007: path override checks
+    // P006/P011/P007: path override checks
     let plugin_dir = path.parent().unwrap_or(Path::new("."));
     for (field, value) in manifest.path_overrides() {
         // P006: absolute path
@@ -233,6 +240,23 @@ pub fn validate_manifest(path: &Path) -> Vec<Diagnostic> {
                 .with_field(field)
                 .with_suggestion("Use a relative path (e.g., \"./my-commands\")"),
             );
+            continue;
+        }
+
+        // P011: path traversal
+        if contains_path_traversal(value) {
+            diags.push(
+                Diagnostic::new(
+                    Severity::Error,
+                    P011,
+                    format!("`{field}` contains path traversal: \"{value}\""),
+                )
+                .with_field(field)
+                .with_suggestion(
+                    "Remove `..` components — paths must stay within the plugin directory",
+                ),
+            );
+            continue;
         }
 
         // P007: path does not exist
@@ -571,5 +595,51 @@ mod tests {
         assert!(!diags
             .iter()
             .any(|d| d.code == P010 && d.field == Some("author")));
+    }
+
+    #[test]
+    fn path_traversal_p011() {
+        let (_dir, path) = write_manifest(r#"{ "name": "test", "commands": "../outside/cmds" }"#);
+        let diags = validate_manifest(&path);
+        assert!(diags.iter().any(|d| d.code == P011));
+    }
+
+    #[test]
+    fn embedded_traversal_p011() {
+        let (_dir, path) = write_manifest(r#"{ "name": "test", "agents": "sub/../agents" }"#);
+        let diags = validate_manifest(&path);
+        assert!(diags.iter().any(|d| d.code == P011));
+    }
+
+    #[test]
+    fn dot_slash_no_traversal() {
+        let dir = tempdir().unwrap();
+        let cmds = dir.path().join("my-commands");
+        fs::create_dir(&cmds).unwrap();
+        let path = dir.path().join("plugin.json");
+        fs::write(&path, r#"{ "name": "test", "commands": "./my-commands" }"#).unwrap();
+        let diags = validate_manifest(&path);
+        assert!(!diags.iter().any(|d| d.code == P011));
+    }
+
+    #[test]
+    fn traversal_skips_existence_check() {
+        // P011 should NOT also produce P007
+        let (_dir, path) = write_manifest(r#"{ "name": "test", "commands": "../escape" }"#);
+        let diags = validate_manifest(&path);
+        assert!(diags.iter().any(|d| d.code == P011));
+        assert!(
+            !diags.iter().any(|d| d.code == P007),
+            "traversal should skip P007"
+        );
+    }
+
+    #[test]
+    fn absolute_path_still_p006() {
+        let (_dir, path) = write_manifest(r#"{ "name": "test", "commands": "/usr/local/cmds" }"#);
+        let diags = validate_manifest(&path);
+        assert!(diags.iter().any(|d| d.code == P006));
+        // Should NOT trigger P011 since it's caught by P006 first
+        assert!(!diags.iter().any(|d| d.code == P011));
     }
 }
