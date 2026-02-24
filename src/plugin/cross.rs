@@ -136,7 +136,7 @@ pub fn validate_cross_component(root: &Path) -> Vec<Diagnostic> {
     // X002: Hook command references script that doesn't exist
     let hooks_path = root.join("hooks.json");
     if hooks_path.is_file() {
-        if let Ok(content) = std::fs::read_to_string(&hooks_path) {
+        if let Ok(content) = crate::parser::read_file_checked(&hooks_path) {
             if let Ok(raw) = serde_json::from_str::<serde_json::Value>(&content) {
                 check_hook_script_paths(&raw, root, &mut diags);
             }

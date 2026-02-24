@@ -10,7 +10,7 @@ use std::path::Path;
 ///
 /// Uses `symlink_metadata()` to avoid following symlinks.
 #[must_use]
-pub(crate) fn is_regular_file(path: &Path) -> bool {
+pub fn is_regular_file(path: &Path) -> bool {
     path.symlink_metadata()
         .map(|m| m.file_type().is_file())
         .unwrap_or(false)

@@ -67,6 +67,7 @@ pub use diagnostics::{Diagnostic, Severity, ValidationTarget};
 pub use errors::{AigentError, Result};
 pub use fixer::apply_fixes;
 pub use formatter::{diff_skill, format_content, format_skill, FormatResult};
+pub use fs_util::is_regular_file;
 pub use linter::lint;
 #[doc(inline)]
 pub use models::SkillProperties;

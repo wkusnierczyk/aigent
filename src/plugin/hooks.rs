@@ -59,7 +59,7 @@ pub fn validate_hooks(path: &Path) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
 
     // Read file
-    let content = match std::fs::read_to_string(path) {
+    let content = match crate::parser::read_file_checked(path) {
         Ok(c) => c,
         Err(e) => {
             diags.push(Diagnostic::new(

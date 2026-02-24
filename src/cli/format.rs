@@ -27,6 +27,13 @@ pub(crate) fn run(skill_dirs: Vec<PathBuf>, check: bool, recursive: bool) {
                         eprint!("{diff}");
                     } else {
                         let path = aigent::find_skill_md(dir).unwrap();
+                        if !aigent::is_regular_file(&path) {
+                            eprintln!(
+                                "aigent format: target is no longer a regular file: {}",
+                                path.display()
+                            );
+                            std::process::exit(1);
+                        }
                         std::fs::write(&path, &result.content).unwrap_or_else(|e| {
                             eprintln!("aigent format: failed to write {}: {e}", path.display());
                             std::process::exit(1);
